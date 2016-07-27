@@ -6209,7 +6209,7 @@ static void free_zapped_rcu(struct rcu_head *ch)
 	call_rcu_zapped(delayed_free.pf + delayed_free.index);
 
 	lockdep_unlock();
-	raw_local_irq_restore(flags);
+	lockdep_stage_restore(flags);
 }
 
 /*
@@ -6252,13 +6252,13 @@ static void lockdep_free_key_range_reg(void *start, unsigned long size)
 
 	init_data_structures_once();
 
-	raw_local_irq_save(flags);
+	flags = lockdep_stage_disable();
 	lockdep_lock();
 	pf = get_pending_free();
 	__lockdep_free_key_range(pf, start, size);
 	call_rcu_zapped(pf);
 	lockdep_unlock();
-	raw_local_irq_restore(flags);
+	lockdep_stage_restore(flags);
 
 	/*
 	 * Wait for any possible iterators from look_up_lock_class() to pass
@@ -6354,7 +6354,7 @@ static void lockdep_reset_lock_reg(struct lockdep_map *lock)
 	unsigned long flags;
 	int locked;
 
-	raw_local_irq_save(flags);
+	flags = lockdep_stage_disable();
 	locked = graph_lock();
 	if (!locked)
 		goto out_irq;
@@ -6365,7 +6365,7 @@ static void lockdep_reset_lock_reg(struct lockdep_map *lock)
 
 	graph_unlock();
 out_irq:
-	raw_local_irq_restore(flags);
+	lockdep_stage_restore(flags);
 }
 
 /*
@@ -6432,7 +6432,7 @@ void lockdep_unregister_key(struct lock_class_key *key)
 		call_rcu_zapped(pf);
 	}
 	lockdep_unlock();
-	raw_local_irq_restore(flags);
+	lockdep_stage_restore(flags);
 
 	/* Wait until is_dynamic_key() has finished accessing k->hash_entry. */
 	synchronize_rcu();
