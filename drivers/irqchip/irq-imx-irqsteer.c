@@ -75,6 +75,7 @@ static const struct irq_chip imx_irqsteer_irq_chip = {
 	.name		= "irqsteer",
 	.irq_mask	= imx_irqsteer_irq_mask,
 	.irq_unmask	= imx_irqsteer_irq_unmask,
+	.flags			= IRQCHIP_PIPELINE_SAFE,
 };
 
 static int imx_irqsteer_irq_map(struct irq_domain *h, unsigned int irq,
