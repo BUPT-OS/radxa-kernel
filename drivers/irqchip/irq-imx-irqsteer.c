@@ -30,7 +30,7 @@ struct irqsteer_data {
 	struct clk		*ipg_clk;
 	int			irq[CHAN_MAX_OUTPUT_INT];
 	int			irq_count;
-	raw_spinlock_t		lock;
+	hard_spinlock_t		lock;
 	int			reg_num;
 	int			channel;
 	struct irq_domain	*domain;
