@@ -1181,7 +1181,7 @@ static const struct irq_chip intel_gpio_irq_chip = {
 	.irq_unmask = intel_gpio_irq_unmask,
 	.irq_set_type = intel_gpio_irq_type,
 	.irq_set_wake = intel_gpio_irq_wake,
-	.flags = IRQCHIP_MASK_ON_SUSPEND | IRQCHIP_IMMUTABLE,
+	.flags = IRQCHIP_MASK_ON_SUSPEND | IRQCHIP_IMMUTABLE | IRQCHIP_PIPELINE_SAFE,
 	GPIOCHIP_IRQ_RESOURCE_HELPERS,
 };
 
