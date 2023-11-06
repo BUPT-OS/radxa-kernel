@@ -1918,13 +1918,13 @@ int __sys_bind(int fd, struct sockaddr __user *umyaddr, int addrlen)
 			err = security_socket_bind(sock,
 						   (struct sockaddr *)&address,
 						   addrlen);
-			if (sock_oob_capable(sock) && !err)
-				err = sock_oob_bind(sock, (struct sockaddr *)
-						&address, addrlen);
 			if (!err)
 				err = sock->ops->bind(sock,
 						      (struct sockaddr *)
 						      &address, addrlen);
+			if (!err && sock_oob_capable(sock))
+				err = sock_oob_bind(sock, (struct sockaddr *)
+						&address, addrlen);
 		}
 		fput_light(sock->file, fput_needed);
 	}
@@ -2122,14 +2122,12 @@ int __sys_connect_file(struct file *file, struct sockaddr_storage *address,
 	if (err)
 		goto out;
 
-	if (sock_oob_capable(sock))
-		err = sock_oob_connect(sock, (struct sockaddr *)address,
-				addrlen);
-	if (err)
-		goto out;
-
 	err = sock->ops->connect(sock, (struct sockaddr *)address, addrlen,
 				 sock->file->f_flags | file_flags);
+
+	if (!err && sock_oob_capable(sock))
+		err = sock_oob_connect(sock, (struct sockaddr *)address,
+				addrlen);
 out:
 	return err;
 }
