@@ -165,7 +165,8 @@ int __weak sock_oob_bind(struct socket *sock, struct sockaddr *addr, int len)
 	return 0;
 }
 
-int __weak sock_oob_connect(struct socket *sock, struct sockaddr *addr, int len)
+int __weak sock_oob_connect(struct socket *sock,
+			struct sockaddr *addr, int len, int flags)
 {
 	return 0;
 }
@@ -221,7 +222,7 @@ static inline int sock_oob_bind(struct socket *sock,
 }
 
 static inline int sock_oob_connect(struct socket *sock,
-				struct sockaddr *addr, int len)
+				struct sockaddr *addr, int len, int flags)
 {
 	return 0;
 }
@@ -2127,7 +2128,7 @@ int __sys_connect_file(struct file *file, struct sockaddr_storage *address,
 
 	if (!err && sock_oob_capable(sock))
 		err = sock_oob_connect(sock, (struct sockaddr *)address,
-				addrlen);
+				addrlen, sock->file->f_flags | file_flags);
 out:
 	return err;
 }
