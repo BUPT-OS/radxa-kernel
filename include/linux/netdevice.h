@@ -1692,6 +1692,8 @@ struct net_device_ops {
  * @IFF_TX_SKB_NO_LINEAR: device/driver is capable of xmitting frames with
  *	skb_headlen(skb) == 0 (data starts from frag0)
  * @IFF_CHANGE_PROTO_DOWN: device supports setting carrier via IFLA_PROTO_DOWN
+ * @IFF_OOB_CAPABLE: device supports direct out-of-band I/O operations.
+ * @IFF_OOB_PORT: device is an active out-of-band port.
  */
 enum netdev_priv_flags {
 	IFF_802_1Q_VLAN			= 1<<0,
@@ -1727,6 +1729,8 @@ enum netdev_priv_flags {
 	IFF_LIVE_RENAME_OK		= 1<<30,
 	IFF_TX_SKB_NO_LINEAR		= BIT_ULL(31),
 	IFF_CHANGE_PROTO_DOWN		= BIT_ULL(32),
+	IFF_OOB_CAPABLE			= BIT_ULL(33),
+	IFF_OOB_PORT			= BIT_ULL(34),
 };
 
 #define IFF_802_1Q_VLAN			IFF_802_1Q_VLAN
@@ -1761,6 +1765,8 @@ enum netdev_priv_flags {
 #define IFF_L3MDEV_RX_HANDLER		IFF_L3MDEV_RX_HANDLER
 #define IFF_LIVE_RENAME_OK		IFF_LIVE_RENAME_OK
 #define IFF_TX_SKB_NO_LINEAR		IFF_TX_SKB_NO_LINEAR
+#define IFF_OOB_CAPABLE			IFF_OOB_CAPABLE
+#define IFF_OOB_PORT			IFF_OOB_PORT
 
 /* Specifies the type of the struct net_device::ml_priv pointer */
 enum netdev_ml_priv_type {
@@ -4281,22 +4287,22 @@ int netif_xmit_oob(struct sk_buff *skb);
 
 static inline bool netdev_is_oob_capable(struct net_device *dev)
 {
-	return !!(dev->oob_context.flags & IFF_OOB_CAPABLE);
+	return !!(dev->priv_flags & IFF_OOB_CAPABLE);
 }
 
 static inline void netdev_enable_oob_port(struct net_device *dev)
 {
-	dev->oob_context.flags |= IFF_OOB_PORT;
+	dev->priv_flags |= IFF_OOB_PORT;
 }
 
 static inline void netdev_disable_oob_port(struct net_device *dev)
 {
-	dev->oob_context.flags &= ~IFF_OOB_PORT;
+	dev->priv_flags &= ~IFF_OOB_PORT;
 }
 
 static inline bool netdev_is_oob_port(struct net_device *dev)
 {
-	return !!(dev->oob_context.flags & IFF_OOB_PORT);
+	return !!(dev->priv_flags & IFF_OOB_PORT);
 }
 
 static inline struct sk_buff *netdev_alloc_oob_skb(struct net_device *dev,
