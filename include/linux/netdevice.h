@@ -1398,6 +1398,18 @@ struct netdev_net_notifier {
  *	Get hardware timestamp based on normal/adjustable time or free running
  *	cycle counter. This function is required if physical clock supports a
  *	free running cycle counter.
+ * struct sk_buff *(*ndo_alloc_oob_skb)(struct net_device *dev,
+ * 					dma_addr_t *dma_addr);
+ *	Allocate a buffer for out-of-band I/O. The memory must be immediately
+ *	DMA-suitable, living in the linear kernel address space. i.e. no highmem.
+ *	This handler must be provided if IFF_OOB_CAPABLE is set in the out-of-band
+ *	context flags.
+ * void	(*ndo_free_oob_skb)(struct net_device *dev,
+ *			    struct sk_buff *skb,
+ *			    dma_addr_t dma_addr);
+ *	Free a buffer previously allocated from ndo_alloc_oob_skb() exclusively.
+ *	This handler must be provided if IFF_OOB_CAPABLE is set in the out-of-band
+ *	context flags.
  */
 struct net_device_ops {
 	int			(*ndo_init)(struct net_device *dev);
@@ -4242,6 +4254,13 @@ void netif_device_attach(struct net_device *dev);
 
 bool netif_receive_oob(struct sk_buff *skb);
 
+/**
+ *	netif_oob_diversion - is I/O traffic diverted for out-of-band handling.
+ *	@dev: network device
+ *
+ * Check if the RX/TX packets are currently diverted for out-of-band
+ * handling by a companion kernel.
+ */
 static inline bool netif_oob_diversion(const struct net_device *dev)
 {
 	return test_bit(__LINK_STATE_OOB, &dev->state);
