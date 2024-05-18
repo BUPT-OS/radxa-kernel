@@ -224,9 +224,9 @@ DEFINE_IDTENTRY_RAW(int80_emulation)
 
 	do_syscall_32_irqs_on(regs, nr);
 
+done:
 	instrumentation_end();
 
-done:
 	syscall_exit_to_user_mode(regs);
 }
 #else /* CONFIG_IA32_EMULATION */
