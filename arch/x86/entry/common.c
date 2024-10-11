@@ -210,7 +210,7 @@ DEFINE_IDTENTRY_RAW(int80_emulation)
 
 	nr = syscall_32_enter(regs);
 
-	local_irq_enable_full();
+	syscall_enter_from_user_enable_irqs();
 	nr = syscall_enter_from_user_mode_work(regs, nr);
 
 	if (dovetailing()) {
