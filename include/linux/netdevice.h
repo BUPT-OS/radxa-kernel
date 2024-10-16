@@ -1409,9 +1409,6 @@ struct netdev_net_notifier {
  * void	(*ndo_disable_oob)(struct net_device *dev);
  *	Turn off out-of-band I/O handling, reverting the effect of ndo_enable_oob().
  *	This handler is optional.
- * void	(*ndo_disable_oob)(struct net_device *dev);
- *	Turn off out-of-band I/O handling, reverting the effect of ndo_enable_oob().
- *	This handler is optional.
  */
 struct net_device_ops {
 	int			(*ndo_init)(struct net_device *dev);
@@ -4270,8 +4267,8 @@ bool netif_receive_oob(struct sk_buff *skb);
  *	netif_oob_diversion - is the ingress traffic diverted for out-of-band handling?
  *	@dev: network device
  *
- * Check if the RX packets are currently diverted to a companion
- * kernel for out-of-band handling.
+ * Check if the RX packets to this (real) device are currently
+ * diverted to a companion kernel for out-of-band handling.
  */
 static inline bool netif_oob_diversion(const struct net_device *dev)
 {
