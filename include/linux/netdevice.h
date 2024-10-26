@@ -4256,6 +4256,11 @@ void netif_device_attach(struct net_device *dev);
 
 #ifdef CONFIG_NET_OOB
 
+static inline void netdev_set_oob_capable(struct net_device *dev)
+{
+	dev->priv_flags |= IFF_OOB_CAPABLE;
+}
+
 static inline bool netdev_is_oob_capable(struct net_device *dev)
 {
 	return !!(dev->priv_flags & IFF_OOB_CAPABLE);
@@ -4328,6 +4333,10 @@ void netif_tx_unlock_oob(struct netdev_queue *txq);
 void process_inband_tx_backlog(struct softnet_data *sd);
 
 #else  /* !CONFIG_NET_OOB */
+
+static inline void netdev_set_oob_capable(struct net_device *dev)
+{
+}
 
 static inline bool netif_receive_oob(struct sk_buff *skb)
 {
