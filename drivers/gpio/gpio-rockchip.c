@@ -564,6 +564,7 @@ static int rockchip_interrupts_register(struct rockchip_pin_bank *bank)
 	gc->chip_types[0].chip.irq_set_type = rockchip_irq_set_type;
 	gc->chip_types[0].chip.irq_request_resources = rockchip_irq_reqres;
 	gc->chip_types[0].chip.irq_release_resources = rockchip_irq_relres;
+	gc->chip_types[0].chip.flags |= IRQCHIP_PIPELINE_SAFE;
 	gc->wake_enabled = IRQ_MSK(bank->nr_pins);
 
 	/*

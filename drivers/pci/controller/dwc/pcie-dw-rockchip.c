@@ -144,7 +144,7 @@ struct rk_pcie {
 	bool				finish_probe;
 	struct regulator		*vpcie3v3;
 	struct irq_domain		*irq_domain;
-	raw_spinlock_t			intx_lock;
+	hard_spinlock_t			intx_lock;
 	u16				aspm;
 	u32				l1ss_ctl1;
 	u32				l1ss_ctl2;
@@ -972,7 +972,7 @@ static struct irq_chip rk_pcie_legacy_irq_chip = {
 	.irq_disable	= rk_pcie_legacy_irq_mask,
 	.irq_mask	= rk_pcie_legacy_irq_mask,
 	.irq_unmask	= rk_pcie_legacy_irq_unmask,
-	.flags		= IRQCHIP_SKIP_SET_WAKE | IRQCHIP_MASK_ON_SUSPEND,
+	.flags		= IRQCHIP_SKIP_SET_WAKE | IRQCHIP_MASK_ON_SUSPEND | IRQCHIP_PIPELINE_SAFE,
 };
 
 static int rk_pcie_intx_map(struct irq_domain *domain, unsigned int irq,
