@@ -5,6 +5,7 @@
 #include <linux/err.h>
 #include <linux/mutex.h>
 #include <linux/of.h>
+#include <linux/cdev.h>
 
 struct pwm_chip;
 
@@ -92,6 +93,7 @@ struct pwm_device {
 	struct pwm_args args;
 	struct pwm_state state;
 	struct pwm_state last;
+	struct cdev cdev;
 };
 
 /**

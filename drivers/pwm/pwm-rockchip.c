@@ -6,6 +6,11 @@
  * Copyright (C) 2014 ROCKCHIP, Inc.
  */
 
+#include "uapi/evl/devices/pwm.h"
+#include "linux/container_of.h"
+#include "linux/printk.h"
+#include "linux/uaccess.h"
+#include <linux/cdev.h>
 #include <linux/clk.h>
 #include <linux/debugfs.h>
 #include <linux/interrupt.h>
@@ -339,6 +344,8 @@ struct rockchip_pwm_data {
 	u32 oneshot_rpt_max;
 	u32 wave_table_max;
 };
+
+int pwm_cdev_register(struct pwm_device *pwm);
 
 static inline struct rockchip_pwm_chip *to_rockchip_pwm_chip(struct pwm_chip *c)
 {
@@ -843,12 +850,13 @@ static int rockchip_pwm_apply(struct pwm_chip *chip, struct pwm_device *pwm,
 	struct pwm_state curstate;
 	bool enabled;
 	int ret = 0;
-
 	if (!pc->oneshot_en) {
 		ret = clk_enable(pc->pclk);
 		if (ret)
 			return ret;
 	}
+
+	pr_info("1\n");
 
 	pwm_get_state(pwm, &curstate);
 	enabled = curstate.enabled;
@@ -861,6 +869,7 @@ static int rockchip_pwm_apply(struct pwm_chip *chip, struct pwm_device *pwm,
 		enabled = false;
 	}
 
+	pr_info("2\n");
 	rockchip_pwm_config(chip, pwm, state);
 	if (state->enabled != enabled) {
 		ret = rockchip_pwm_enable(chip, pwm, state->enabled);
@@ -868,6 +877,7 @@ static int rockchip_pwm_apply(struct pwm_chip *chip, struct pwm_device *pwm,
 			goto out;
 	}
 
+	pr_info("3\n");
 	if (state->enabled)
 		ret = pinctrl_select_state(pc->pinctrl, pc->active_state);
 out:
@@ -2227,7 +2237,8 @@ static int rockchip_pwm_probe(struct platform_device *pdev)
 			goto err_pclk;
 		}
 	}
-
+	
+	pwm_cdev_register(&pc->chip.pwms[0]);
 	return 0;
 
 err_pclk:
@@ -2250,7 +2261,6 @@ static int rockchip_pwm_remove(struct platform_device *pdev)
 	 * For oneshot mode, it is needed to wait for bit PWM_ENABLE
 	 * to 0, which is automatic if all periods have been sent.
 	 */
-	pwm_get_state(&pc->chip.pwms[0], &state);
 	if (state.enabled) {
 		if (pc->oneshot_en) {
 			if (readl_poll_timeout(pc->base + pc->data->regs.ctrl,
@@ -2272,6 +2282,220 @@ static int rockchip_pwm_remove(struct platform_device *pdev)
 
 	return 0;
 }
+
+struct rockchip_pwm_context{
+	struct pwm_device* pwm;
+	bool is_oob;
+};
+
+#define PWM_GET_STATE_IOCTL _IOR(0xBE,0x01,struct pwm_uapi_state)
+#define PWM_SET_STATE_IOCTL _IOW(0xBE,0x02,struct pwm_uapi_state)
+#define PWM_GET_STATUS_IOCTL _IOR(0XBE,0X03,bool)
+#define PWM_SET_STATUS_IOCTL _IOW(0xBE,0x04,bool)
+
+
+static long rockchip_pwm_ioctl(struct file *filp, unsigned int cmd, unsigned long arg){
+	struct rockchip_pwm_context *ctx = filp->private_data;
+	struct pwm_state state;
+	struct pwm_uapi_state ustate;
+	int ret;
+	int is_enable;
+	void __user *uarg = (void __user*)arg;
+
+	switch (cmd) {
+	case PWM_GET_STATUS_IOCTL:
+		pwm_get_state(ctx->pwm, &state);
+		return copy_to_user(uarg, &state.enabled, sizeof(bool))? -EFAULT : 0;
+	case PWM_SET_STATUS_IOCTL:
+		ret = copy_from_user(&is_enable,uarg, sizeof(bool));
+		if (ret){
+			return -EFAULT;
+		}
+		pwm_get_state(ctx->pwm, &state);
+		pr_info("is_enable=%d",is_enable);
+		switch (is_enable) {
+		case 0:
+			state.enabled = false;
+			break;
+		case 1:
+			state.enabled = true;
+			break;
+		default:
+			return -EINVAL;
+		}
+		state.period = 100000;
+		state.polarity = PWM_POLARITY_NORMAL;
+		state.duty_cycle = 0;
+		ret = pwm_apply_state(ctx->pwm,&state);
+		return ret;
+	case PWM_GET_STATE_IOCTL:
+
+		break;
+
+	case PWM_SET_STATE_IOCTL:
+		ret = copy_from_user(&ustate,uarg, sizeof(ustate));
+		if (ret){
+			return -EFAULT;
+		}
+		pwm_get_state(ctx->pwm, &state);
+		pr_info("period=%lld\b",ustate.period);
+		pr_info("enabled=%d\b",ustate.enabled);
+		state.period = ustate.period;
+		state.duty_cycle= ustate.duty_cycle;
+		state.polarity = ustate.polarity == UAPI_PWM_POLARITY_NORMAL?PWM_POLARITY_NORMAL:PWM_POLARITY_INVERSED;
+		state.enabled = ustate.enabled;
+		ret = pwm_apply_state(ctx->pwm, &state);
+		return ret;
+	default:
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+// static long rockchip_pwm_oob_ioctl(struct file *filp, unsigned int cmd, unsigned long arg){
+// 	struct rockchip_pwm_context *ctx = filp->private_data;
+// 	void __user *uarg = (void __user*)arg;
+	
+// 	if (!ctx->is_oob){
+// 		return -EPERM;
+// 	}
+
+// 	switch (cmd) {
+// 	case PWM_GET_STATUS_IOCTL:
+// 		return copy_to_user(uarg, &ctx->pwm->state.enabled, sizeof(bool))? -EFAULT : 0;
+// 	case PWM_SET_STATUS_IOCTL:
+// 		break;
+// 	case PWM_GET_STATE_IOCTL:
+// 		break;
+// 	}
+
+// 	return 0;
+// }
+
+// static int rockchip_prepare_oob(struct pwm_chip *chip){
+// 	int err;
+// 	struct rockchip_pwm_chip *pc = to_rockchip_pwm_chip(chip);
+// 	if(!pc->oneshot_en){
+// 		err = clk_enable(pc->pclk);
+// 		if (err)
+// 			return err;
+// 	}
+
+// 	err = pinctrl_select_state(pc->pinctrl, pc->active_state);
+// 	return err;
+// }
+
+static void rockchip_finish_oob(struct pwm_chip *chip){
+	struct rockchip_pwm_chip *pc = to_rockchip_pwm_chip(chip);
+	if (!pc->oneshot_en){
+		clk_disable(pc->pclk);
+	}
+}
+
+static int rockchip_pwm_open(struct inode *inode, struct file *filp){
+	struct cdev *cdev = inode->i_cdev;
+	struct pwm_device* pwm;
+	struct rockchip_pwm_context* ctx;
+	int err = 0;
+
+	pwm = container_of(cdev, struct pwm_device, cdev);
+	pwm = pwm_request_from_chip(pwm->chip, pwm->hwpwm, "cdev");
+	if (IS_ERR(pwm)){
+		return PTR_ERR(pwm);
+	}
+
+	stream_open(inode, filp);
+
+	ctx = kzalloc(sizeof(*ctx),GFP_KERNEL);
+	if (!ctx){
+		goto alloc_fail;
+	}
+	ctx->pwm = pwm;
+	filp->private_data = ctx;
+	
+	if (filp->f_mode & O_OOB){
+		// open in oob mode
+		ctx->is_oob = true;
+	}
+
+	return 0;
+
+alloc_fail:
+	pwm_put(pwm);
+	return err;
+}
+
+static int rockchip_pwm_release (struct inode *inode, struct file *filp){
+	struct cdev* cdev = inode->i_cdev;
+	struct pwm_device* pwm;
+
+	pwm = container_of(cdev, struct pwm_device, cdev);
+
+	if (filp->f_mode & O_OOB){
+		rockchip_finish_oob(pwm->chip);
+	}
+	pwm_put(pwm);
+
+	return 0;
+}
+#define PWM_DEVT_CHIP_BASE_OFFSET 5
+#define PWM_CHIP_BASE(dev)	((unsigned int) ((dev) << PWM_DEVT_CHIP_BASE_OFFSET))
+
+static dev_t pwm_devt;
+static bool is_pwm_devt_init = false;
+
+static const struct file_operations cdev_pwm_fops = {
+	.unlocked_ioctl = rockchip_pwm_ioctl,
+	// .oob_ioctl = 
+	.release = rockchip_pwm_release,
+	.open = rockchip_pwm_open,
+	.owner = THIS_MODULE,
+	// #ifdef CONFIG_COMPAT
+	// .compat_ioctl = gpio_ioctl_compat,
+	// #endif
+};
+
+static int pwm_cdev_init(void)
+{
+	int ret;
+	ret = alloc_chrdev_region(&pwm_devt,0, 16, "rockchip_pwm");
+	return ret;
+}
+
+int pwm_cdev_register(struct pwm_device *pwm)
+{
+	int ret;
+	if (!READ_ONCE(is_pwm_devt_init)){
+		pwm_cdev_init();
+		is_pwm_devt_init = true;
+	}
+	pr_info("cmd1=%lu cmd2=%lu,cmd3=%lu\n",PWM_GET_STATUS_IOCTL,PWM_SET_STATUS_IOCTL,PWM_SET_STATE_IOCTL);
+    dev_t devt = MKDEV(MAJOR(pwm_devt), PWM_CHIP_BASE(pwm->chip->base) | pwm->hwpwm);
+
+	cdev_init(&pwm->cdev, &cdev_pwm_fops);
+    
+	ret = cdev_add(&pwm->cdev, devt, 1);
+	if (ret)
+		return ret;
+
+	pr_info("added pwm char dev (%d:%d)\n",MAJOR(devt),MINOR(devt));
+
+	// device_create(NULL,NULL,devt,)
+	// if (IS_ERR(parent)) {
+	// 	dev_warn(pwm,
+	// 		 "device_create failed for pwm_chip sysfs export\n");
+	// }
+	return 0;
+}
+
+void pwm_cdev_unregister(struct pwm_device *pwm)
+{
+	cdev_del(&pwm->cdev);
+}
+
+
+
 
 static struct platform_driver rockchip_pwm_driver = {
 	.driver = {
