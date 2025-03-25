@@ -17,6 +17,10 @@ static bool pwmlib_initialized = true;
 
 struct pwmlib_context {
 	struct pwm_device *pwm;
+#ifdef CONFIG_PWM_OOB
+	struct evl_file efile;
+	bool is_oob;
+#endif
 };
 
 static long pwmlib_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
@@ -43,8 +47,52 @@ static long pwmlib_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 					 PWM_POLARITY_NORMAL :
 					 PWM_POLARITY_INVERSED;
 		state.enabled = ustate.enabled;
+#ifdef CONFIG_PWM_ROCKCHIP_ONESHOT
+		state.oneshot_count = ustate.oneshot_count;
+#endif
 		ret = pwm_apply_state(ctx->pwm, &state);
 		return ret;
+	default:
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static long pwm_oob_ioctl(struct file *filp, unsigned int cmd,
+			  unsigned long arg)
+{
+	struct pwmlib_context *ctx = filp->private_data;
+	void __user *uarg = (void __user *)arg;
+	int ret;
+	struct pwm_state_request ustate;
+	struct pwm_state state;
+
+	if (!ctx->is_oob) {
+		return -EPERM;
+	}
+
+	switch (cmd) {
+	case PWM_GET_STATE_IOCTL:
+		pwm_get_state(ctx->pwm, &state);
+		return copy_to_user(uarg, &state, sizeof(ustate)) ? -EFAULT : 0;
+	case PWM_SET_STATE_IOCTL:
+		ret = copy_from_user(&ustate, uarg, sizeof(ustate));
+		if (ret) {
+			return -EFAULT;
+		}
+		if (ustate.polarity != PWM_UAPI_POLARITY_NORMAL) {
+			return -EINVAL;
+		}
+		pwm_get_state(ctx->pwm, &state);
+		state.duty_cycle = ustate.duty_cycle;
+		state.enabled = ustate.enabled;
+		state.period = ustate.period;
+		state.polarity = PWM_POLARITY_NORMAL;
+#ifdef CONFIG_PWM_ROCKCHIP_ONESHOT
+		state.oneshot_count = ustate.oneshot_count;
+#endif
+		return pwm_oob_apply_state(ctx->pwm, &state);
 	default:
 		return -EINVAL;
 	}
@@ -73,12 +121,31 @@ static int pwmlib_open(struct inode *inode, struct file *filp)
 	if (!ctx) {
 		goto alloc_fail;
 	}
+#ifdef CONFIG_PWM_OOB
+	if (filp->f_flags & O_OOB) {
+		ret = evl_open_file(&ctx->efile, filp);
+		if (ret) {
+			goto evl_open_failed;
+		}
+		ret = pwm_oob_prepare(pwm);
+		if (ret) {
+			goto prepare_failed;
+		}
+		ctx->is_oob = true;
+	}
+#endif
 	ctx->pwm = pwm;
 	filp->private_data = ctx;
 	nonseekable_open(inode, filp);
 
 	return 0;
 
+#ifdef CONFIG_PWM_OOB
+evl_open_failed:
+	evl_release_file(&ctx->efile);
+prepare_failed:
+	kfree(ctx);
+#endif
 alloc_fail:
 	pwm_put(pwm);
 	return ret;
@@ -90,6 +157,12 @@ static int pwmlib_release(struct inode *inode, struct file *filp)
 	struct pwm_device *pwm = container_of(cdev, struct pwm_device, cdev);
 	struct pwmlib_context *ctx = filp->private_data;
 
+#ifdef CONFIG_PWM_OOB
+	if (filp->f_mode & O_OOB) {
+		pwm_oob_finish(pwm);
+		evl_release_file(&ctx->efile);
+	}
+#endif
 	kfree(ctx);
 	pwm_put(pwm);
 
@@ -103,6 +176,9 @@ static const struct file_operations pwm_fops = {
 	.open = pwmlib_open,
 	.owner = THIS_MODULE,
 	.llseek = no_llseek,
+#ifdef CONFIG_PWM_OOB
+	.oob_ioctl = pwm_oob_ioctl
+#endif
 };
 
 static int __init pwm_cdev_init(void)

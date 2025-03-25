@@ -709,4 +709,10 @@ config PWM_CDEV
 	  for PWM. The character device allows userspace to control GPIOs
 	  using ioctl() operations.
 
+config PWM_OOB
+	bool "Out-of_band PWM calls"
+	depends on EVL
+	select PWM_CDEV
+	help
+	  Enable suuport for out-of-band PWM state request.
 endif
