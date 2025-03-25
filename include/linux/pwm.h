@@ -2,6 +2,7 @@
 #ifndef __LINUX_PWM_H
 #define __LINUX_PWM_H
 
+#include "linux/cdev.h"
 #include <linux/err.h>
 #include <linux/mutex.h>
 #include <linux/of.h>
@@ -80,6 +81,8 @@ struct pwm_state {
  * @args: PWM arguments
  * @state: last applied state
  * @last: last implemented state (for PWM_DEBUG)
+ * @dev: pwm device struct.
+ * @cdev: pwm character device. 
  */
 struct pwm_device {
 	const char *label;
@@ -92,6 +95,9 @@ struct pwm_device {
 	struct pwm_args args;
 	struct pwm_state state;
 	struct pwm_state last;
+
+	struct device dev;
+	struct cdev cdev;
 };
 
 /**
