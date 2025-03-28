@@ -556,6 +556,12 @@ config PL330_DMA
 	  You need to provide platform specific settings via
 	  platform_data for a dma-pl330 device.
 
+config PL330_DMA_OOB
+	bool "Out-of-band support for PL330 DMA"
+	depends on PL330_DMA && DOVETAIL
+	help
+	  Enable out-of-band requests to PL330 DMA.
+
 config PXA_DMA
 	bool "PXA DMA support"
 	depends on (ARCH_MMP || ARCH_PXA)
