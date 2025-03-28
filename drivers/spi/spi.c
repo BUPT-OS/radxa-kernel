@@ -4453,6 +4453,7 @@ static int bus_unlock_oob(struct spi_controller *ctlr)
 static int prepare_oob_dma(struct spi_controller *ctlr,
 			struct spi_oob_transfer *xfer)
 {
+	dev_info(&ctlr->dev, "call prepare_oob_dma\n");
 	struct dma_async_tx_descriptor *desc;
 	size_t len = xfer->setup.frame_len;
 	dma_cookie_t cookie;
@@ -4461,6 +4462,8 @@ static int prepare_oob_dma(struct spi_controller *ctlr,
 
 	/* TX to second half of I/O buffer. */
 	addr = xfer->dma_addr + xfer->aligned_frame_len;
+	dev_info(&ctlr->dev, "call prepare_oob_dma, tx's addr = %llx, xfer->setup.frame_len = "
+			"%zu, xfer->aligned_frame_len = %zu\n", (unsigned long long)addr, len, xfer->aligned_frame_len);
 	desc = dmaengine_prep_slave_single(ctlr->dma_tx, addr, len,
 					DMA_MEM_TO_DEV,
 					DMA_OOB_INTERRUPT|DMA_OOB_PULSE);
@@ -4477,6 +4480,7 @@ static int prepare_oob_dma(struct spi_controller *ctlr,
 
 	/* RX to first half of I/O buffer. */
 	addr = xfer->dma_addr;
+	dev_info(&ctlr->dev, "call prepare_oob_dma, rx's addr = %llx\n", (unsigned long long)addr);
 	desc = dmaengine_prep_slave_single(ctlr->dma_rx, addr, len,
 					DMA_DEV_TO_MEM,
 					DMA_OOB_INTERRUPT|DMA_OOB_PULSE);
@@ -4555,6 +4559,9 @@ static int validate_oob_xfer(struct spi_device *spi,
 int spi_prepare_oob_transfer(struct spi_device *spi,
 			struct spi_oob_transfer *xfer)
 {
+	printk(KERN_INFO "spi_prepare_oob_transfer\n");
+	dev_info(&spi->controller->dev, "call spi_prepare_oob_transfer for spi_device %s\n",
+			spi->modalias);
 	struct spi_controller *ctlr;
 	dma_addr_t dma_addr;
 	size_t alen, iolen;
@@ -4592,6 +4599,12 @@ int spi_prepare_oob_transfer(struct spi_device *spi,
 	xfer->aligned_frame_len = alen;
 	xfer->effective_speed_hz = 0;
 
+	// 前置了 ctlr->prepare_oob_transfer(ctlr, xfer) 用于设置 ctlr->dma_rx 和 ctlr->dma_tx 的 dma_slave_config
+	// 之所以这么做是因为 spi-rockchip controller 在 spi 传输前才会设置 dma_slave_config ，这一点操作与 spi-bcm2835 controller 在 probe 时即设置的逻辑不同
+	ret = ctlr->prepare_oob_transfer(ctlr, xfer);
+	if (ret)
+		goto fail_prep_xfer;
+
 	ret = prepare_oob_dma(ctlr, xfer);
 	if (ret)
 		goto fail_prep_dma;
@@ -4600,17 +4613,13 @@ int spi_prepare_oob_transfer(struct spi_device *spi,
 	if (ret)
 		goto fail_bus_lock;
 
-	ret = ctlr->prepare_oob_transfer(ctlr, xfer);
-	if (ret)
-		goto fail_prep_xfer;
-
 	return 0;
 
-fail_prep_xfer:
-	bus_unlock_oob(ctlr);
 fail_bus_lock:
-	unprepare_oob_dma(ctlr);
+	bus_unlock_oob(ctlr);
 fail_prep_dma:
+	unprepare_oob_dma(ctlr);
+fail_prep_xfer:
 	dma_free_coherent(ctlr->dev.parent, iolen, iobuf, dma_addr);
 
 	return ret;
