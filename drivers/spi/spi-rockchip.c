@@ -786,7 +786,7 @@ static void rockchip_spi_oob_config(struct rockchip_spi *rs,
 		break;
 	}
 
-	dev_info(&spi->controller->dev, "spi_oob_config, bits_per_word: %d, frame_len: %d\n, cr0: 0x%x, cr1: 0x%x\n",
+	dev_info(rs->dev, "spi_oob_config, bits_per_word: %d, frame_len: %d\n, cr0: 0x%x, cr1: 0x%x\n",
 		xfer->setup.bits_per_word, xfer->setup.frame_len, cr0, cr1);
 
 	dmacr |= TF_DMA_EN;
@@ -822,7 +822,7 @@ static void rockchip_spi_oob_config(struct rockchip_spi *rs,
 		       rs->regs + ROCKCHIP_SPI_DMARDLR);
 	writel_relaxed(dmacr, rs->regs + ROCKCHIP_SPI_DMACR);
 
-	dev_info(&spi->controller->dev, "spi_oob_config, dmacr's value: %d, rs->fifo_len(tdlr): %d, rs->n_bytes: %d, burst_size(rdlr): %d\n",
+	dev_info(rs->dev, "spi_oob_config, dmacr's value: %d, rs->fifo_len(tdlr): %d, rs->n_bytes: %d, burst_size(rdlr): %d\n",
 		dmacr, rs->fifo_len / 2 - 1, rs->n_bytes, rockchip_spi_calc_burst_size(xfer->setup.frame_len / rs->n_bytes) - 1);
 
 	if (rs->max_baud_div_in_cpha && xfer->setup.speed_hz != rs->speed_hz) {
@@ -1030,13 +1030,13 @@ static int rockchip_spi_prepare_oob_transfer(struct spi_controller *ctlr,
 {
 	if (xfer->setup.frame_len > ROCKCHIP_SPI_MAX_TRANLEN - 3)
 		return -EINVAL;
-	dev_info(&ctlr->dev, "enter rockchip_spi_prepare_oob_transfer, xfer->setup.frame_len = %d\n", xfer->setup.frame_len);
 
 	struct rockchip_spi *rs = spi_controller_get_devdata(ctlr);
+	dev_info(rs->dev, "enter rockchip_spi_prepare_oob_transfer, xfer->setup.frame_len = %d\n", xfer->setup.frame_len);
 
-	dev_info(&ctlr->dev, "before setup, rs->n_bytes = %d\n", rs->n_bytes);
+	dev_info(rs->dev, "before setup, rs->n_bytes = %d\n", rs->n_bytes);
 	rs->n_bytes = xfer->setup.bits_per_word <= 8 ? 1 : 2;
-	dev_info(&ctlr->dev, "after setup, rs->n_bytes = %d\n", rs->n_bytes);
+	dev_info(rs->dev, "after setup, rs->n_bytes = %d\n", rs->n_bytes);
 
 
 	struct dma_slave_config rxconf = {
@@ -1045,7 +1045,7 @@ static int rockchip_spi_prepare_oob_transfer(struct spi_controller *ctlr,
 		.src_addr_width = rs->n_bytes,
 		.src_maxburst = rockchip_spi_calc_burst_size(xfer->setup.frame_len / rs->n_bytes),
 	};
-	dev_info(&ctlr->dev, "after setup, rx.src_addr = %llx\n, rx.src_addr_width = %d\n, rx.src_maxburst = %d\n", rxconf.src_addr, rxconf.src_addr_width, rxconf.src_maxburst);
+	dev_info(rs->dev, "after setup, rx.src_addr = %llx\n, rx.src_addr_width = %d\n, rx.src_maxburst = %d\n", rxconf.src_addr, rxconf.src_addr_width, rxconf.src_maxburst);
 
 	dmaengine_slave_config(ctlr->dma_rx, &rxconf);
 
@@ -1055,7 +1055,7 @@ static int rockchip_spi_prepare_oob_transfer(struct spi_controller *ctlr,
 		.dst_addr_width = rs->n_bytes,
 		.dst_maxburst = rs->fifo_len / 4,
 	};
-	dev_info(&ctlr->dev, "after setup, tx.dst_addr = %llx\n, tx.dst_addr_width = %d\n, tx.dst_maxburst = %d\n", txconf.dst_addr, txconf.dst_addr_width, txconf.dst_maxburst);
+	dev_info(rs->dev, "after setup, tx.dst_addr = %llx\n, tx.dst_addr_width = %d\n, tx.dst_maxburst = %d\n", txconf.dst_addr, txconf.dst_addr_width, txconf.dst_maxburst);
 
 	dmaengine_slave_config(ctlr->dma_tx, &txconf);
 
@@ -1065,8 +1065,8 @@ static int rockchip_spi_prepare_oob_transfer(struct spi_controller *ctlr,
 static void rockchip_spi_start_oob_transfer(struct spi_controller *ctlr,
 					struct spi_oob_transfer *xfer)
 {
-	dev_info(&ctlr->dev, "call rockchip_spi_start_oob_transfer\n");
 	struct rockchip_spi *rs = spi_controller_get_devdata(ctlr);
+	dev_info(rs->dev, "call rockchip_spi_start_oob_transfer\n");
 	struct spi_device *spi = xfer->spi;
 	rockchip_spi_oob_config(rs, spi, xfer, ctlr->slave_abort);
 	if (rs->cs_inactive)
@@ -1078,8 +1078,8 @@ static void rockchip_spi_start_oob_transfer(struct spi_controller *ctlr,
 static void rockchip_spi_pulse_oob_transfer(struct spi_controller *ctlr,
 					struct spi_oob_transfer *xfer)
 {
-	dev_info(&ctlr->dev, "call rockchip_spi_pulse_oob_transfer\n");
 	struct rockchip_spi *rs = spi_controller_get_devdata(ctlr);
+	dev_info(rs->dev, "call rockchip_spi_pulse_oob_transfer\n");
 
 	/* unfortunately setting the fifo threshold level to generate an
 	 * interrupt exactly when the fifo is full doesn't seem to work,
