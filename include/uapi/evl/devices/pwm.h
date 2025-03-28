@@ -14,11 +14,13 @@ struct pwm_uapi_state {
 	u64 period;
 	u64 duty_cycle;
 	enum pwm_uapi_polarity polarity;
+#ifdef __KERNEL__
 #ifdef CONFIG_PWM_ROCKCHIP_ONESHOT
 	u64 oneshot_count;
 	u32 oneshot_repeat;
 	u64 duty_offset;
 #endif /* CONFIG_PWM_ROCKCHIP_ONESHOT */
+#endif
     bool enabled;
 };
 
