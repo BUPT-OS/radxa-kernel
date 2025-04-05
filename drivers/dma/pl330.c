@@ -503,6 +503,9 @@ struct pl330_dmac {
 
 	struct reset_control	*rstc;
 	struct reset_control	*rstc_ocp;
+#ifdef CONFIG_PL330_DMA_OOB
+	u32		pending_stat;
+#endif
 };
 
 static struct pl330_of_quirks {
@@ -1773,6 +1776,20 @@ xfer_exit:
 	return ret;
 }
 
+static inline bool pl330_oob_handled(struct dma_pl330_desc *desc)
+{
+	return !!(desc->txd.flags & DMA_OOB_INTERRUPT);
+}
+
+static inline bool pl330_oob_pulsed(struct dma_pl330_desc *desc)
+{
+	dev_info(desc->pchan->dmac->ddma.dev, "%s:%d desc's flags: %x\n",
+		__func__, __LINE__, desc->txd.flags);
+	dev_info(desc->pchan->dmac->ddma.dev, "%s:%d desc's flags & DMA_OOB_PULSE: %x\n",
+		__func__, __LINE__, desc->txd.flags & DMA_OOB_PULSE);
+	return !!(desc->txd.flags & DMA_OOB_PULSE);
+}
+
 static void dma_pl330_rqcb(struct dma_pl330_desc *desc, enum pl330_op_err err)
 {
 	struct dma_pl330_chan *pch;
@@ -1893,7 +1910,12 @@ static int pl330_update(struct pl330_dmac *pl330)
 	}
 
 	/* Check which event happened i.e, thread notified */
-	val = readl(regs + ES);
+	if (running_oob()) {
+		val = readl(regs + ES);	
+	} else {
+		val = pl330->pending_stat;
+		pl330->pending_stat = 0;
+	}
 	if (pl330->pcfg.num_events < 32
 			&& val & ~((1 << pl330->pcfg.num_events) - 1)) {
 		pl330->dmac_tbd.reset_dmac = true;
@@ -1903,17 +1925,22 @@ static int pl330_update(struct pl330_dmac *pl330)
 		goto updt_exit;
 	}
 
+	unsigned long mask = val;
+
 	// printk("pl330->pcfg.num_events = %d\n", pl330->pcfg.num_events);
 	for (ev = 0; ev < pl330->pcfg.num_events; ev++) {
 		dev_info(pl330->ddma.dev, "%s:%d val = %x,ev = %d\n", __func__, __LINE__, val, ev);
 		if (val & (1 << ev)) { /* Event occurred */
 			struct pl330_thread *thrd;
-			u32 inten = readl(regs + INTEN);
 			int active;
 
-			/* Clear the event */
-			if (inten & (1 << ev))
-				writel(1 << ev, regs + INTCLR);
+			if (running_oob()) {
+				u32 inten = readl(regs + INTEN);
+			
+				/* Clear the event */
+				if (inten & (1 << ev))
+					writel(1 << ev, regs + INTCLR);
+			}
 
 			ret = 1;
 
@@ -1931,28 +1958,47 @@ static int pl330_update(struct pl330_dmac *pl330)
 			descdone = thrd->req[active].desc;
 			dev_info(pl330->ddma.dev, "%s:%d descdone = %px\n", __func__, __LINE__, descdone);
 			if (descdone) {
-				if (!descdone->cyclic) {
-					thrd->req[active].desc = NULL;
-					thrd->req_running = -1;
-					/* Get going again ASAP */
-					pl330_start_thread(thrd);
-				}
+				if (running_oob()) {
+					// TODO: lock needed?
+					// raw_spin_lock(&descdone->pchan->oob_lock);
+					if (pl330_oob_handled(descdone)) {
+						descdone->status = BUSY;
+						// raw_spin_unlock(&descdone->pchan->oob_lock);
+						dmaengine_desc_get_callback(&descdone->txd, NULL);
+						// raw_spin_lock(&descdone->pchan->oob_lock);
+						__clear_bit((1 << ev), &mask);
+					}
+				} else {
+					if (!descdone->cyclic) {
+						thrd->req[active].desc = NULL;
+						thrd->req_running = -1;
+						/* Get going again ASAP */
+						pl330_start_thread(thrd);
+					}
 
-				/* For now, just make a list of callbacks to be done */
-				list_add_tail(&descdone->rqd, &pl330->req_done);
+					/* For now, just make a list of callbacks to be done */
+					list_add_tail(&descdone->rqd, &pl330->req_done);
+				}
 			}
 		}
 	}
 
-	/* Now that we are in no hurry, do the callbacks */
-	dev_info(pl330->ddma.dev, "%s:%d list_empty(&pl330->req_done) = %d\n", __func__, __LINE__, list_empty(&pl330->req_done));
-	while (!list_empty(&pl330->req_done)) {
-		descdone = list_first_entry(&pl330->req_done,
-					    struct dma_pl330_desc, rqd);
-		list_del(&descdone->rqd);
-		raw_spin_unlock_irqrestore(&pl330->oob_lock, flags);
-		dma_pl330_rqcb(descdone, PL330_ERR_NONE);
-		raw_spin_lock_irqsave(&pl330->oob_lock, flags);
+	if (mask) {
+		pl330->pending_stat |= mask;
+		ret = 2;
+	}
+
+	if (!running_oob()) {
+		/* Now that we are in no hurry, do the callbacks */
+		dev_info(pl330->ddma.dev, "%s:%d list_empty(&pl330->req_done) = %d\n", __func__, __LINE__, list_empty(&pl330->req_done));
+		while (!list_empty(&pl330->req_done)) {
+			descdone = list_first_entry(&pl330->req_done,
+							struct dma_pl330_desc, rqd);
+			list_del(&descdone->rqd);
+			raw_spin_unlock_irqrestore(&pl330->oob_lock, flags);
+			dma_pl330_rqcb(descdone, PL330_ERR_NONE);
+			raw_spin_lock_irqsave(&pl330->oob_lock, flags);
+		}
 	}
 
 updt_exit:
@@ -2297,20 +2343,6 @@ static inline void fill_queue(struct dma_pl330_chan *pch)
 			tasklet_schedule(&pch->task);
 		}
 	}
-}
-
-static inline bool pl330_oob_handled(struct dma_pl330_desc *desc)
-{
-	return !!(desc->txd.flags & DMA_OOB_INTERRUPT);
-}
-
-static inline bool pl330_oob_pulsed(struct dma_pl330_desc *desc)
-{
-	dev_info(desc->pchan->dmac->ddma.dev, "%s:%d desc's flags: %x\n",
-		__func__, __LINE__, desc->txd.flags);
-	dev_info(desc->pchan->dmac->ddma.dev, "%s:%d desc's flags & DMA_OOB_PULSE: %x\n",
-		__func__, __LINE__, desc->txd.flags & DMA_OOB_PULSE);
-	return !!(desc->txd.flags & DMA_OOB_PULSE);
 }
 
 static void pl330_tasklet(struct tasklet_struct *t)
@@ -3296,8 +3328,11 @@ pl330_prep_slave_sg(struct dma_chan *chan, struct scatterlist *sgl,
 static irqreturn_t pl330_irq_handler(int irq, void *data)
 {
 	pr_info("------------------%s:%d------------------\n", __func__, __LINE__);
-	if (pl330_update(data))
+	int state = pl330_update(data);
+	if (state == 1)
 		return IRQ_HANDLED;
+	else if (state == 2)
+		return IRQ_FORWARD;
 	else
 		return IRQ_NONE;
 }
