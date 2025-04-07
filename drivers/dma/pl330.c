@@ -1056,6 +1056,9 @@ static bool _trigger(struct pl330_thread *thrd)
 	if (!req)
 		return true;
 
+	dev_info(thrd->dmac->ddma.dev, "%s:%d, id = %d, thrd->req_running = %d, req=%p\n", __func__, __LINE__, 
+		thrd->id, thrd->req_running, req);
+
 	/* Return if req is running */
 	if (idx == thrd->req_running)
 		return true;
@@ -1886,14 +1889,14 @@ static int pl330_update(struct pl330_dmac *pl330)
 	raw_spin_lock_irqsave(&pl330->oob_lock, flags);
 
 	val = readl(regs + FSM) & 0x1;
-	dev_info(pl330->ddma.dev, "%s:%d FSM's raw val = %x\n", __func__, __LINE__, readl(regs + FSM));
+	// dev_info(pl330->ddma.dev, "%s:%d FSM's raw val = %x\n", __func__, __LINE__, readl(regs + FSM));
 	if (val)
 		pl330->dmac_tbd.reset_mngr = true;
 	else
 		pl330->dmac_tbd.reset_mngr = false;
 
 	val = readl(regs + FSC) & ((1 << pl330->pcfg.num_chan) - 1);
-	dev_info(pl330->ddma.dev, "%s:%d FSC's val = %x\n", __func__, __LINE__, val);
+	// dev_info(pl330->ddma.dev, "%s:%d FSC's val = %x\n", __func__, __LINE__, val);
 	pl330->dmac_tbd.reset_chan |= val;
 	if (val) {
 		int i = 0;
@@ -1929,7 +1932,7 @@ static int pl330_update(struct pl330_dmac *pl330)
 
 	// printk("pl330->pcfg.num_events = %d\n", pl330->pcfg.num_events);
 	for (ev = 0; ev < pl330->pcfg.num_events; ev++) {
-		dev_info(pl330->ddma.dev, "%s:%d val = %x,ev = %d\n", __func__, __LINE__, val, ev);
+		// dev_info(pl330->ddma.dev, "%s:%d val = %x,ev = %d\n", __func__, __LINE__, val, ev);
 		if (val & (1 << ev)) { /* Event occurred */
 			struct pl330_thread *thrd;
 			int active;
@@ -1949,8 +1952,9 @@ static int pl330_update(struct pl330_dmac *pl330)
 			thrd = &pl330->channels[id];
 
 			active = thrd->req_running;
-			dev_info(pl330->ddma.dev, "%s:%d id = %d, thrd = %p, active = %d\n",
-					__func__, __LINE__, id, thrd, active);
+			// dev_info(pl330->ddma.dev, "%s:%d id = %d, thrd = %p, active = %d\n",
+			// 		__func__, __LINE__, id, thrd, active);
+			dev_info(pl330->ddma.dev, "%s:%d valid val = %x, ev = %d, id = %d, thrd = %p, active = %d\n", __func__, __LINE__, val, ev, id, thrd, active);
 			if (active == -1) /* Aborted */
 				continue;
 
@@ -1959,14 +1963,13 @@ static int pl330_update(struct pl330_dmac *pl330)
 			dev_info(pl330->ddma.dev, "%s:%d descdone = %px\n", __func__, __LINE__, descdone);
 			if (descdone) {
 				if (running_oob()) {
-					// TODO: lock needed?
-					// raw_spin_lock(&descdone->pchan->oob_lock);
+					// TODO: lock/unlock needed?
 					if (pl330_oob_handled(descdone)) {
 						descdone->status = BUSY;
-						// raw_spin_unlock(&descdone->pchan->oob_lock);
-						dmaengine_desc_get_callback(&descdone->txd, NULL);
-						// raw_spin_lock(&descdone->pchan->oob_lock);
-						__clear_bit((1 << ev), &mask);
+						// raw_spin_unlock_irqrestore(&pl330->oob_lock, flags);
+						dmaengine_desc_get_callback_invoke(&descdone->txd, NULL);
+						// raw_spin_lock_irqsave(&pl330->oob_lock, flags);
+						clear_bit(ev, &mask);
 					}
 				} else {
 					if (!descdone->cyclic) {
@@ -1978,6 +1981,7 @@ static int pl330_update(struct pl330_dmac *pl330)
 
 					/* For now, just make a list of callbacks to be done */
 					list_add_tail(&descdone->rqd, &pl330->req_done);
+					clear_bit(ev, &mask);  // 正确使用位索引而不是位掩码
 				}
 			}
 		}
@@ -2387,6 +2391,7 @@ static void pl330_tasklet(struct tasklet_struct *t)
 	} else {
 		/* Make sure the PL330 Channel thread is active */
 		raw_spin_lock(&pch->thread->dmac->oob_lock);
+		// TODO: trigger or pl330_start_thread?
 		int idx = pch->thread->lstenq;
 		struct _pl330_req *req;
 		if (pch->thread->req[idx].desc != NULL) {
