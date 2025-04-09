@@ -1069,6 +1069,13 @@ static void rockchip_spi_start_oob_transfer(struct spi_controller *ctlr,
 	dev_info(rs->dev, "call rockchip_spi_start_oob_transfer\n");
 	struct spi_device *spi = xfer->spi;
 	rockchip_spi_oob_config(rs, spi, xfer, ctlr->slave_abort);
+
+	// TODO: CS operation is more complex and need more design
+	if (spi_get_csgpiod(spi, 0))
+		ROCKCHIP_SPI_SET_BITS(rs->regs + ROCKCHIP_SPI_SER, 1);
+	else
+		ROCKCHIP_SPI_SET_BITS(rs->regs + ROCKCHIP_SPI_SER, BIT(spi->chip_select));
+
 	if (rs->cs_inactive)
 		writel_relaxed(INT_CS_INACTIVE, rs->regs + ROCKCHIP_SPI_IMR);
 
@@ -1105,6 +1112,12 @@ static void rockchip_spi_terminate_oob_transfer(struct spi_controller *ctlr,
 	 * this also flushes both rx and tx fifos
 	 */
 	 spi_enable_chip(rs, false);
+
+	struct spi_device *spi = xfer->spi;
+	if (spi_get_csgpiod(spi, 0))
+		ROCKCHIP_SPI_CLR_BITS(rs->regs + ROCKCHIP_SPI_SER, 1);
+	else
+		ROCKCHIP_SPI_CLR_BITS(rs->regs + ROCKCHIP_SPI_SER, BIT(spi->chip_select));
 
 	 /* make sure all interrupts are masked and status cleared */
 	 writel_relaxed(0, rs->regs + ROCKCHIP_SPI_IMR);
