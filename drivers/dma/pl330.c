@@ -1022,6 +1022,25 @@ static void _stop(struct pl330_thread *thrd)
 	writel(inten & ~(1 << thrd->ev), regs + INTEN);
 }
 
+static inline bool pl330_oob_handled(struct dma_pl330_desc *desc)
+{
+	return !!(desc->txd.flags & DMA_OOB_INTERRUPT);
+}
+
+static inline bool pl330_oob_pulsed(struct dma_pl330_desc *desc)
+{
+	dev_info(desc->pchan->dmac->ddma.dev, "%s:%d desc's flags: %x\n",
+		__func__, __LINE__, desc->txd.flags);
+	dev_info(desc->pchan->dmac->ddma.dev, "%s:%d desc's flags & DMA_OOB_PULSE: %x\n",
+		__func__, __LINE__, desc->txd.flags & DMA_OOB_PULSE);
+	return !!(desc->txd.flags & DMA_OOB_PULSE);
+}
+
+static inline bool pl330_oob_capable(void)
+{
+	return IS_ENABLED(CONFIG_PL330_DMA_OOB);
+}
+
 /* Start doing req 'idx' of thread 'thrd' */
 static bool _trigger(struct pl330_thread *thrd)
 {
@@ -1056,11 +1075,11 @@ static bool _trigger(struct pl330_thread *thrd)
 	if (!req)
 		return true;
 
-	dev_info(thrd->dmac->ddma.dev, "%s:%d, id = %d, thrd->req_running = %d, req=%p\n", __func__, __LINE__, 
-		thrd->id, thrd->req_running, req);
+	dev_info(thrd->dmac->ddma.dev, "%s:%d, id = %d, idx = %d, thrd->req_running = %d, req=%p\n", __func__, __LINE__, 
+		thrd->id, idx, thrd->req_running, req);
 
 	/* Return if req is running */
-	if (idx == thrd->req_running)
+	if (idx == thrd->req_running && !pl330_oob_pulsed(req->desc))
 		return true;
 
 	desc = req->desc;
@@ -1091,11 +1110,6 @@ static bool _trigger(struct pl330_thread *thrd)
 	thrd->req_running = idx;
 
 	return true;
-}
-
-static inline bool pl330_oob_capable(void)
-{
-	return IS_ENABLED(CONFIG_PL330_DMA_OOB);
 }
 
 static bool pl330_start_thread(struct pl330_thread *thrd)
@@ -1777,20 +1791,6 @@ xfer_exit:
 	raw_spin_unlock_irqrestore(&pl330->oob_lock, flags);
 
 	return ret;
-}
-
-static inline bool pl330_oob_handled(struct dma_pl330_desc *desc)
-{
-	return !!(desc->txd.flags & DMA_OOB_INTERRUPT);
-}
-
-static inline bool pl330_oob_pulsed(struct dma_pl330_desc *desc)
-{
-	dev_info(desc->pchan->dmac->ddma.dev, "%s:%d desc's flags: %x\n",
-		__func__, __LINE__, desc->txd.flags);
-	dev_info(desc->pchan->dmac->ddma.dev, "%s:%d desc's flags & DMA_OOB_PULSE: %x\n",
-		__func__, __LINE__, desc->txd.flags & DMA_OOB_PULSE);
-	return !!(desc->txd.flags & DMA_OOB_PULSE);
 }
 
 static void dma_pl330_rqcb(struct dma_pl330_desc *desc, enum pl330_op_err err)
