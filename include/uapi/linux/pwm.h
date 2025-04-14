@@ -38,13 +38,13 @@ enum uapi_pwm_polarity {
 
  */
 struct pwm_state_request {
-	u64 period;
-	u64 duty_cycle;
+	__u64 period;
+	__u64 duty_cycle;
 	enum uapi_pwm_polarity polarity;
-	u64 oneshot_count;
-	u32 oneshot_repeat;
-	bool enabled;
-	bool usage_power;
+	__u64 oneshot_count;
+	__u32 oneshot_repeat;
+	__u8 enabled;
+	__u8 usage_power;
 };
 
 /*
