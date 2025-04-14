@@ -6,6 +6,7 @@
  * Copyright (C) 2014 ROCKCHIP, Inc.
  */
 
+#include "pwmlib-cdev.h"
 #include <linux/clk.h>
 #include <linux/debugfs.h>
 #include <linux/interrupt.h>
@@ -21,6 +22,9 @@
 #include <linux/pwm-rockchip.h>
 #include <linux/time.h>
 #include "pwm-rockchip-irq-callbacks.h"
+
+#define CREATE_TRACE_POINTS
+#include <trace/events/pwm.h>
 
 #define PWM_MAX_CHANNEL_NUM	8
 
@@ -480,7 +484,7 @@ static void rockchip_pwm_config_v1(struct pwm_chip *chip, struct pwm_device *pwm
 		delay_ns = DIV_ROUND_UP_ULL(div, pc->clk_rate);
 	}
 
-	local_irq_save(flags);
+	flags = hard_local_irq_save();
 
 	ctrl = readl_relaxed(pc->base + PWM_CTRL_V1);
 	if (pc->data->vop_pwm) {
@@ -573,7 +577,7 @@ static void rockchip_pwm_config_v1(struct pwm_chip *chip, struct pwm_device *pwm
 	}
 
 	writel(ctrl, pc->base + PWM_CTRL_V1);
-	local_irq_restore(flags);
+	hard_local_irq_restore(flags);
 }
 
 static int rockchip_pwm_enable_v1(struct pwm_chip *chip, struct pwm_device *pwm, bool enable)
@@ -1908,10 +1912,123 @@ static inline void rockchip_pwm_debugfs_deinit(struct rockchip_pwm_chip *pc)
 }
 #endif
 
+#ifdef CONFIG_PWM_OOB
+int rockchip_pwm_oob_apply(struct pwm_chip *chip, struct pwm_device *pwm,
+		     const struct pwm_state *state){
+	struct rockchip_pwm_chip *pc = to_rockchip_pwm_chip(chip);
+	u32 enable_conf = pc->data->enable_conf;
+	u32 val;
+	bool enable = state->enabled;
+	val = readl_relaxed(pc->base + PWM_CTRL_V1);
+	val &= ~pc->data->enable_conf_mask;
+
+	if (PWM_OUTPUT_CENTER & pc->data->enable_conf_mask) 
+		if (pc->center_aligned)
+			val |= PWM_OUTPUT_CENTER;
+
+	if (pc->oneshot_en) {
+		enable_conf &= ~PWM_MODE_MASK;
+		enable_conf |= PWM_ONESHOT;
+	} else if (pc->capture_en) {
+		enable_conf &= ~PWM_MODE_MASK;
+		enable_conf |= PWM_CAPTURE;
+	}
+
+	if (enable) {
+		val |= enable_conf;
+	}else if (pc->capture_en)
+		val |= PWM_CAPTURE;
+
+	writel_relaxed(val, pc->base + PWM_CTRL_V1);
+
+	if (unlikely((pc->data->vop_pwm)))
+		pc->vop_pwm_en = enable;
+
+	rockchip_pwm_config(chip, pwm,state);
+
+	trace_pwm_apply(pwm, state);
+
+	pwm->state = *state;
+	return 0;
+}
+
+int rockchip_pwm_oob_prepare(struct pwm_chip *chip, struct pwm_device *pwm){
+	int err;
+	struct rockchip_pwm_chip *pc = to_rockchip_pwm_chip(chip);
+	if(!pc->oneshot_en){
+		err = clk_enable(pc->pclk);
+		if (err)
+			return err;
+	}
+
+	err = pinctrl_select_state(pc->pinctrl, pc->active_state);
+	return err;
+}
+void rockchip_pwm_oob_finish(struct pwm_chip *chip, struct pwm_device *pwm){
+	struct rockchip_pwm_chip *pc = to_rockchip_pwm_chip(chip);
+	if (!pc->oneshot_en){
+		clk_disable(pc->pclk);
+	}
+}
+
+
+static irqreturn_t rockchip_pwm_oob_irq_v1(int irq, void *data)
+{
+	struct rockchip_pwm_chip *pc = data;
+	struct pwm_state state;
+	u32 int_ctrl;
+	unsigned int id = pc->channel_id;
+	int val;
+
+	if (id > 3)
+		return IRQ_NONE;
+	val = readl_relaxed(pc->base + PWM_REG_INTSTS(id));
+
+	if ((val & PWM_CH_INT(id)) == 0)
+		return IRQ_NONE;
+
+	writel_relaxed(PWM_CH_INT(id), pc->base + PWM_REG_INTSTS(id));
+
+	if (pc->oneshot_en) {
+		/*
+		 * Set pwm state to disabled when the oneshot mode finished.
+		 */
+		pwm_get_state(&pc->chip.pwms[0], &state);
+		state.enabled = false;
+		rockchip_pwm_oob_apply(pc->chip.pwms[0].chip,&pc->chip.pwms[0],&state);
+	} else if (pc->capture_en) {
+		/*
+		 * Capture input waveform:
+		 *    _______                 _______
+		 *   |       |               |       |
+		 * __|       |_______________|       |________
+		 *   ^0      ^1              ^2
+		 *
+		 * At position 0, the interrupt comes, and DUTY_LPR reg shows the
+		 * low polarity cycles which should be ignored. The effective high
+		 * and low polarity cycles will be calculated in position 1 and
+		 * position 2, where the interrupt comes.
+		 */
+		if (pc->capture_cnt++ > 3) {
+			int_ctrl = readl_relaxed(pc->base + PWM_REG_INT_EN(pc->channel_id));
+			int_ctrl &= ~PWM_CH_INT(pc->channel_id);
+			writel_relaxed(int_ctrl, pc->base + PWM_REG_INT_EN(pc->channel_id));
+		}
+	}
+
+	return IRQ_HANDLED;
+}
+#endif
+
 static const struct pwm_ops rockchip_pwm_ops = {
 	.capture = rockchip_pwm_capture,
 	.apply = rockchip_pwm_apply,
 	.get_state = rockchip_pwm_get_state,
+	#ifdef CONFIG_PWM_OOB
+	.oob_apply = rockchip_pwm_oob_apply,
+	.oob_prepare = rockchip_pwm_oob_prepare,
+	.oob_finish = rockchip_pwm_oob_finish,
+	#endif
 	.owner = THIS_MODULE,
 };
 
@@ -2057,6 +2174,8 @@ static int rockchip_pwm_get_channel_id(const char *name)
 	return name[len - 2] - '0';
 }
 
+static irqreturn_t rockchip_pwm_oob_irq_v1(int irq, void *data);
+
 static int rockchip_pwm_probe(struct platform_device *pdev)
 {
 	const struct of_device_id *id;
@@ -2177,10 +2296,17 @@ static int rockchip_pwm_probe(struct platform_device *pdev)
 					dev_warn(&pdev->dev,
 						 "Can't get oneshot mode irq and oneshot interrupt is unsupported\n");
 				} else {
+					#ifdef CONFIG_PWM_OOB
+					ret = devm_request_irq(&pdev->dev, pc->irq,
+								   rockchip_pwm_oob_irq_v1,
+							       IRQF_NO_SUSPEND | IRQF_SHARED | IRQF_OOB,
+							       "oob_rk_pwm_oneshot_irq", pc);
+					#else
 					ret = devm_request_irq(&pdev->dev, pc->irq,
 							       pc->data->funcs.irq_handler,
 							       IRQF_NO_SUSPEND | IRQF_SHARED,
 							       "rk_pwm_oneshot_irq", pc);
+					#endif
 					if (ret) {
 						dev_err(&pdev->dev, "Claim oneshot IRQ failed\n");
 						goto err_pclk;
@@ -2228,6 +2354,12 @@ static int rockchip_pwm_probe(struct platform_device *pdev)
 		}
 	}
 
+	#ifdef CONFIG_PWM_OOB
+	ret = pwmlib_cdev_register(&pc->chip.pwms[0]);
+	if (ret) {
+		dev_err(&pdev->dev,"Can't create pwm character device\n");
+	}
+	#endif
 	return 0;
 
 err_pclk:
@@ -2262,6 +2394,9 @@ static int rockchip_pwm_remove(struct platform_device *pdev)
 		}
 	}
 
+	#ifdef CONFIG_PWM_OOB
+		pwmlib_cdev_unregister(&pc->chip.pwms[0]);
+	#endif
 	pwmchip_remove(&pc->chip);
 
 	if (pc->oneshot_en)

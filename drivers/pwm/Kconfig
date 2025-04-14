@@ -701,4 +701,18 @@ config PWM_XILINX
 	  To compile this driver as a module, choose M here: the module
 	  will be called pwm-xilinx.
 
+config PWM_CDEV
+	bool "PWM Character device (/dev/pwm) support" if EXPERT
+	default n
+	help
+	  Say Y here to add the character device /dev/pwm interface
+	  for PWM. The character device allows userspace to control GPIOs
+	  using ioctl() operations.
+
+config PWM_OOB
+	bool "Out-of_band PWM calls"
+	depends on EVL
+	select PWM_CDEV
+	help
+	  Enable suuport for out-of-band PWM state request.
 endif

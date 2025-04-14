@@ -2,6 +2,7 @@
 #ifndef __LINUX_PWM_H
 #define __LINUX_PWM_H
 
+#include "linux/cdev.h"
 #include <linux/err.h>
 #include <linux/mutex.h>
 #include <linux/of.h>
@@ -80,6 +81,8 @@ struct pwm_state {
  * @args: PWM arguments
  * @state: last applied state
  * @last: last implemented state (for PWM_DEBUG)
+ * @dev: pwm device struct.
+ * @cdev: pwm character device. 
  */
 struct pwm_device {
 	const char *label;
@@ -92,6 +95,9 @@ struct pwm_device {
 	struct pwm_args args;
 	struct pwm_state state;
 	struct pwm_state last;
+
+	struct device dev;
+	struct cdev cdev;
 };
 
 /**
@@ -283,6 +289,12 @@ struct pwm_ops {
 		     const struct pwm_state *state);
 	int (*get_state)(struct pwm_chip *chip, struct pwm_device *pwm,
 			 struct pwm_state *state);
+#if IS_ENABLED(CONFIG_PWM_OOB)
+	int (*oob_apply)(struct pwm_chip *chip, struct pwm_device *pwm,
+		     const struct pwm_state *state);
+	int (*oob_prepare)(struct pwm_chip *chip, struct pwm_device *pwm);
+	void (*oob_finish)(struct pwm_chip *chip, struct pwm_device *pwm);	
+#endif
 	struct module *owner;
 };
 
@@ -414,6 +426,11 @@ struct pwm_device *devm_pwm_get(struct device *dev, const char *con_id);
 struct pwm_device *devm_fwnode_pwm_get(struct device *dev,
 				       struct fwnode_handle *fwnode,
 				       const char *con_id);
+#if IS_ENABLED(CONFIG_PWM_OOB)
+int pwm_oob_apply_state(struct pwm_device *pwm, const struct pwm_state *state);
+int pwm_oob_prepare(struct pwm_device* device);
+void pwm_oob_finish(struct pwm_device* device);
+#endif
 #else
 static inline struct pwm_device *pwm_request(int pwm_id, const char *label)
 {

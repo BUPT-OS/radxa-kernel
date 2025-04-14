@@ -593,6 +593,83 @@ int pwm_apply_state(struct pwm_device *pwm, const struct pwm_state *state)
 }
 EXPORT_SYMBOL_GPL(pwm_apply_state);
 
+
+#if IS_ENABLED(CONFIG_PWM_OOB)
+/**
+ * pwm_oob_apply_state() - atomically apply a new state to a PWM device
+ * @pwm: PWM device
+ * @state: new state to apply
+ * 
+ * Unlike pwm_apply_state, the function must not sleep and use limited
+ * inband service, so that the function can get realtime guarantee.
+ */
+int pwm_oob_apply_state(struct pwm_device *pwm, const struct pwm_state *state){
+	struct pwm_chip *chip;
+	int err;
+	if (!pwm || !state || !state->period ||
+	    state->duty_cycle > state->period)
+		return -EINVAL;
+
+	chip = pwm->chip;
+
+	if (state->period == pwm->state.period &&
+	    state->duty_cycle == pwm->state.duty_cycle &&
+	    state->polarity == pwm->state.polarity &&
+#ifdef CONFIG_PWM_ROCKCHIP_ONESHOT
+	    state->oneshot_count == pwm->state.oneshot_count &&
+	    state->oneshot_repeat == pwm->state.oneshot_repeat &&
+	    state->duty_offset == pwm->state.duty_offset &&
+#endif
+	    state->enabled == pwm->state.enabled &&
+	    state->usage_power == pwm->state.usage_power)
+		return 0;
+
+	err = chip->ops->oob_apply(chip, pwm, state);
+	if (err)
+		return err;
+
+	trace_pwm_apply(pwm, state);
+
+	pwm->state = *state;
+
+	return 0;
+}
+
+/**
+ * pwm_oob_prepare() - setup the device before starting oob service.
+ * @pwm: PWM device
+ */
+int pwm_oob_prepare(struct pwm_device* pwm){
+	struct pwm_chip* chip;
+	int err;
+	chip = pwm->chip;	
+	
+	if (!chip->ops->oob_prepare){
+		return -ENOSYS;
+	}
+
+	err = chip->ops->oob_prepare(chip, pwm);
+	if (err)
+		return err;
+	return 0;
+}
+
+/**
+ * pwm_oob_finish() - setup the device after finishing oob service.
+ * @pwm: PWM device
+ */
+void pwm_oob_finish(struct pwm_device* pwm){
+	struct pwm_chip* chip;
+	chip = pwm->chip;	
+	
+	if (!chip->ops->oob_finish){
+		return;
+	}
+
+	chip->ops->oob_finish(chip, pwm);
+}
+#endif
+
 /**
  * pwm_capture() - capture and report a PWM signal
  * @pwm: PWM device
