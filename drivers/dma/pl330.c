@@ -273,6 +273,10 @@ static unsigned cmd_line;
 /* Delay for runtime PM autosuspend, ms */
 #define PL330_AUTOSUSPEND_DELAY 20
 
+#define PL330_UPDATE_NONE 0x0
+#define PL330_UPDATE_HANDLED 0x1
+#define PL330_UPDATE_FORWARD 0x2
+
 /* Populated by the PL330 core driver for DMA API driver's info */
 struct pl330_config {
 	u32	periph_id;
@@ -440,7 +444,7 @@ struct dma_pl330_chan {
 	struct pl330_dmac *dmac;
 
 	/* To protect channel manipulation */
-	hard_spinlock_t oob_lock;
+	hybrid_spinlock_t oob_lock;
 
 	/*
 	 * Hardware channel thread of PL330 DMAC. NULL if the channel is
@@ -468,7 +472,7 @@ struct pl330_dmac {
 	/* Pool of descriptors available for the DMAC's channels */
 	struct list_head desc_pool;
 	/* To protect desc_pool manipulation */
-	hard_spinlock_t oob_pool_lock;
+	spinlock_t pool_lock;
 
 	/* Size of MicroCode buffers for each channel. */
 	unsigned mcbufsz;
@@ -477,7 +481,7 @@ struct pl330_dmac {
 	/* Populated by the PL330 core driver during pl330_add */
 	struct pl330_config	pcfg;
 
-	hard_spinlock_t		oob_lock;
+	hybrid_spinlock_t		oob_lock;
 	/* Maximum possible events/irqs */
 	int			events[32];
 	/* BUS address of MicroCode buffer */
@@ -1041,6 +1045,26 @@ static inline bool pl330_oob_capable(void)
 	return IS_ENABLED(CONFIG_PL330_DMA_OOB);
 }
 
+static struct _pl330_req *pl330_find_next_req(struct pl330_thread *thrd, int *idx)
+{
+    struct _pl330_req *req = NULL;
+    int i;
+
+    i = 1 - thrd->lstenq;
+    if (thrd->req[i].desc != NULL) {
+        req = &thrd->req[i];
+    } else {
+        i = thrd->lstenq;
+        if (thrd->req[i].desc != NULL)
+            req = &thrd->req[i];
+    }
+    
+    if (idx)
+        *idx = i;
+        
+    return req;
+}
+
 /* Start doing req 'idx' of thread 'thrd' */
 static bool _trigger(struct pl330_thread *thrd)
 {
@@ -1060,16 +1084,17 @@ static bool _trigger(struct pl330_thread *thrd)
 	if (_state(thrd) != PL330_STATE_STOPPED)
 		return true;
 
-	idx = 1 - thrd->lstenq;
-	if (thrd->req[idx].desc != NULL) {
-		req = &thrd->req[idx];
-	} else {
-		idx = thrd->lstenq;
-		if (thrd->req[idx].desc != NULL)
-			req = &thrd->req[idx];
-		else
-			req = NULL;
-	}
+	// idx = 1 - thrd->lstenq;
+	// if (thrd->req[idx].desc != NULL) {
+	// 	req = &thrd->req[idx];
+	// } else {
+	// 	idx = thrd->lstenq;
+	// 	if (thrd->req[idx].desc != NULL)
+	// 		req = &thrd->req[idx];
+	// 	else
+	// 		req = NULL;
+	// }
+	req = pl330_find_next_req(thrd, &idx);
 
 	/* Return if no request */
 	if (!req)
@@ -1134,8 +1159,13 @@ static bool pl330_start_thread(struct pl330_thread *thrd)
 		UNTIL(thrd, PL330_STATE_STOPPED)
 		fallthrough;
 
-	case PL330_STATE_STOPPED:
-		return _trigger(thrd);
+	case PL330_STATE_STOPPED: {
+		struct _pl330_req *req;
+		req = pl330_find_next_req(thrd, NULL);
+		if (!req || !pl330_oob_capable() || !pl330_oob_pulsed(req->desc))
+			return _trigger(thrd);
+		return true;
+	}
 
 	case PL330_STATE_WFP:
 	case PL330_STATE_QUEUEBUSY:
@@ -1882,7 +1912,7 @@ static int pl330_update(struct pl330_dmac *pl330)
 	unsigned long flags;
 	void __iomem *regs;
 	u32 val;
-	int id, ev, ret = 0;
+	int id, ev, ret = PL330_UPDATE_NONE;
 
 	regs = pl330->base;
 
@@ -1924,7 +1954,7 @@ static int pl330_update(struct pl330_dmac *pl330)
 		pl330->dmac_tbd.reset_dmac = true;
 		dev_err(pl330->ddma.dev, "%s:%d Unexpected!\n", __func__,
 			__LINE__);
-		ret = 1;
+		ret = PL330_UPDATE_HANDLED;
 		goto updt_exit;
 	}
 
@@ -1945,7 +1975,7 @@ static int pl330_update(struct pl330_dmac *pl330)
 					writel(1 << ev, regs + INTCLR);
 			}
 
-			ret = 1;
+			ret = PL330_UPDATE_HANDLED;
 
 			id = pl330->events[ev];
 
@@ -1965,10 +1995,9 @@ static int pl330_update(struct pl330_dmac *pl330)
 				if (running_oob()) {
 					// TODO: lock/unlock needed?
 					if (pl330_oob_handled(descdone)) {
-						descdone->status = BUSY;
-						// raw_spin_unlock_irqrestore(&pl330->oob_lock, flags);
+						raw_spin_unlock_irqrestore(&pl330->oob_lock, flags);
 						dmaengine_desc_get_callback_invoke(&descdone->txd, NULL);
-						// raw_spin_lock_irqsave(&pl330->oob_lock, flags);
+						raw_spin_lock_irqsave(&pl330->oob_lock, flags);
 						clear_bit(ev, &mask);
 					}
 				} else {
@@ -1989,7 +2018,7 @@ static int pl330_update(struct pl330_dmac *pl330)
 
 	if (mask) {
 		pl330->pending_stat |= mask;
-		ret = 2;
+		ret = PL330_UPDATE_FORWARD;
 	}
 
 	if (!running_oob()) {
@@ -2011,7 +2040,7 @@ updt_exit:
 	if (pl330->dmac_tbd.reset_dmac
 			|| pl330->dmac_tbd.reset_mngr
 			|| pl330->dmac_tbd.reset_chan) {
-		ret = 1;
+		ret = PL330_UPDATE_HANDLED;
 		tasklet_schedule(&pl330->tasks);
 	}
 
@@ -2392,22 +2421,22 @@ static void pl330_tasklet(struct tasklet_struct *t)
 		/* Make sure the PL330 Channel thread is active */
 		raw_spin_lock(&pch->thread->dmac->oob_lock);
 		// TODO: trigger or pl330_start_thread?
-		int idx = pch->thread->lstenq;
-		struct _pl330_req *req;
-		if (pch->thread->req[idx].desc != NULL) {
-			req = &pch->thread->req[idx];
-		} else {
-			idx = 1 - pch->thread->lstenq;
-			if (pch->thread->req[idx].desc != NULL)
-				req = &pch->thread->req[idx];
-			else
-				req = NULL;
-		}
-		dev_info(pch->dmac->ddma.dev, "%s:%d req->desc = %p, flag=%x\n",
-			__func__, __LINE__, req->desc, req->desc->txd.flags);
-		if (!pl330_oob_capable() || !pl330_oob_pulsed(req->desc)) {
-			pl330_start_thread(pch->thread);
-		}
+		// int idx = 1 - pch->thread->lstenq;
+		// struct _pl330_req *req;
+		// if (pch->thread->req[idx].desc != NULL) {
+		// 	req = &pch->thread->req[idx];
+		// } else {
+		// 	idx = pch->thread->lstenq;
+		// 	if (pch->thread->req[idx].desc != NULL)
+		// 		req = &pch->thread->req[idx];
+		// 	else
+		// 		req = NULL;
+		// }
+		// dev_info(pch->dmac->ddma.dev, "%s:%d req->desc = %p, flag=%x\n",
+		// 	__func__, __LINE__, req->desc, req->desc->txd.flags);
+		// if (!pl330_oob_capable() || !pl330_oob_pulsed(req->desc)) {
+		pl330_start_thread(pch->thread);
+		// }
 		raw_spin_unlock(&pch->thread->dmac->oob_lock);
 	}
 
@@ -2832,12 +2861,21 @@ static void pl330_issue_pending(struct dma_chan *chan)
 static int pl330_pulse_oob(struct dma_chan *chan)
 {
 	struct dma_pl330_chan *pch = to_pchan(chan);
-	raw_spin_lock(&pch->thread->dmac->oob_lock);
+	struct _pl330_req *req = pl330_find_next_req(pch->thread, NULL);
+	unsigned long flags;
+	int ret = -EIO;
+
+	raw_spin_lock_irqsave(&pch->thread->dmac->oob_lock, flags);
 	// TODO:
 	dev_info(pch->dmac->ddma.dev, "%s:%d\n", __func__, __LINE__);
-	pl330_start_thread(pch->thread);
-	raw_spin_unlock(&pch->thread->dmac->oob_lock);
-	return 0;
+	// pl330_start_thread(pch->thread);
+	if (req && pl330_oob_pulsed(req->desc)) {
+		_trigger(pch->thread);
+		ret = 0;
+	}
+	raw_spin_unlock_irqrestore(&pch->thread->dmac->oob_lock, flags);
+
+	return ret;
 }
 #else
 static int pl330_pulse_oob(struct dma_chan *chan)
@@ -2890,7 +2928,7 @@ static inline void _init_desc(struct dma_pl330_desc *desc)
 }
 
 /* Returns the number of descriptors added to the DMAC pool */
-static int add_desc(struct list_head *pool, hard_spinlock_t *oob_lock,
+static int add_desc(struct list_head *pool, spinlock_t *lock,
 		    gfp_t flg, int count)
 {
 	struct dma_pl330_desc *desc;
@@ -2901,25 +2939,25 @@ static int add_desc(struct list_head *pool, hard_spinlock_t *oob_lock,
 	if (!desc)
 		return 0;
 
-	raw_spin_lock_irqsave(oob_lock, flags);
+	spin_lock_irqsave(lock, flags);
 
 	for (i = 0; i < count; i++) {
 		_init_desc(&desc[i]);
 		list_add_tail(&desc[i].node, pool);
 	}
 
-	raw_spin_unlock_irqrestore(oob_lock, flags);
+	spin_unlock_irqrestore(lock, flags);
 
 	return count;
 }
 
 static struct dma_pl330_desc *pluck_desc(struct list_head *pool,
-					 hard_spinlock_t *oob_lock)
+					 spinlock_t *lock)
 {
 	struct dma_pl330_desc *desc = NULL;
 	unsigned long flags;
 
-	raw_spin_lock_irqsave(oob_lock, flags);
+	spin_lock_irqsave(lock, flags);
 
 	if (!list_empty(pool)) {
 		desc = list_entry(pool->next,
@@ -2929,9 +2967,10 @@ static struct dma_pl330_desc *pluck_desc(struct list_head *pool,
 
 		desc->status = PREP;
 		desc->txd.callback = NULL;
+		desc->txd.flags = 0;
 	}
 
-	raw_spin_unlock_irqrestore(oob_lock, flags);
+	spin_unlock_irqrestore(lock, flags);
 
 	return desc;
 }
@@ -2943,17 +2982,17 @@ static struct dma_pl330_desc *pl330_get_desc(struct dma_pl330_chan *pch)
 	struct dma_pl330_desc *desc;
 
 	/* Pluck one desc from the pool of DMAC */
-	desc = pluck_desc(&pl330->desc_pool, &pl330->oob_pool_lock);
+	desc = pluck_desc(&pl330->desc_pool, &pl330->pool_lock);
 
 	/* If the DMAC pool is empty, alloc new */
 	if (!desc) {
-		static DEFINE_HARD_SPINLOCK(oob_lock);
+		static DEFINE_SPINLOCK(lock);
 		LIST_HEAD(pool);
 
-		if (!add_desc(&pool, &oob_lock, GFP_ATOMIC, 1))
+		if (!add_desc(&pool, &lock, GFP_ATOMIC, 1))
 			return NULL;
 
-		desc = pluck_desc(&pool, &oob_lock);
+		desc = pluck_desc(&pool, &lock);
 		WARN_ON(!desc || !list_empty(&pool));
 	}
 
@@ -3242,7 +3281,7 @@ static void __pl330_giveback_desc(struct pl330_dmac *pl330,
 	if (!first)
 		return;
 
-	raw_spin_lock_irqsave(&pl330->oob_pool_lock, flags);
+	spin_lock_irqsave(&pl330->pool_lock, flags);
 
 	while (!list_empty(&first->node)) {
 		desc = list_entry(first->node.next,
@@ -3252,7 +3291,7 @@ static void __pl330_giveback_desc(struct pl330_dmac *pl330,
 
 	list_move_tail(&first->node, &pl330->desc_pool);
 
-	raw_spin_unlock_irqrestore(&pl330->oob_pool_lock, flags);
+	spin_unlock_irqrestore(&pl330->pool_lock, flags);
 }
 
 // TODO: done
@@ -3332,14 +3371,14 @@ pl330_prep_slave_sg(struct dma_chan *chan, struct scatterlist *sgl,
 
 static irqreturn_t pl330_irq_handler(int irq, void *data)
 {
-	pr_info("------------------%s:%d------------------\n", __func__, __LINE__);
-	int state = pl330_update(data);
-	if (state == 1)
+	switch (pl330_update(data)) {
+	case PL330_UPDATE_HANDLED:
 		return IRQ_HANDLED;
-	else if (state == 2)
+	case PL330_UPDATE_FORWARD:
 		return IRQ_FORWARD;
-	else
+	default:
 		return IRQ_NONE;
+	}
 }
 
 #define PL330_DMA_BUSWIDTHS \
@@ -3521,10 +3560,10 @@ pl330_probe(struct amba_device *adev, const struct amba_id *id)
 		return ret;
 
 	INIT_LIST_HEAD(&pl330->desc_pool);
-	hard_spin_lock_init(&pl330->oob_pool_lock);
+	spin_lock_init(&pl330->pool_lock);
 
 	/* Create a descriptor pool of default size */
-	if (!add_desc(&pl330->desc_pool, &pl330->oob_pool_lock,
+	if (!add_desc(&pl330->desc_pool, &pl330->pool_lock,
 		      GFP_KERNEL, NR_DEFAULT_DESC))
 		dev_warn(&adev->dev, "unable to allocate desc\n");
 
