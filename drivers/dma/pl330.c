@@ -1033,10 +1033,10 @@ static inline bool pl330_oob_handled(struct dma_pl330_desc *desc)
 
 static inline bool pl330_oob_pulsed(struct dma_pl330_desc *desc)
 {
-	dev_info(desc->pchan->dmac->ddma.dev, "%s:%d desc's flags: %x\n",
-		__func__, __LINE__, desc->txd.flags);
-	dev_info(desc->pchan->dmac->ddma.dev, "%s:%d desc's flags & DMA_OOB_PULSE: %x\n",
-		__func__, __LINE__, desc->txd.flags & DMA_OOB_PULSE);
+	// dev_info(desc->pchan->dmac->ddma.dev, "%s:%d desc's flags: %x\n",
+	// 	__func__, __LINE__, desc->txd.flags);
+	// dev_info(desc->pchan->dmac->ddma.dev, "%s:%d desc's flags & DMA_OOB_PULSE: %x\n",
+	// 	__func__, __LINE__, desc->txd.flags & DMA_OOB_PULSE);
 	return !!(desc->txd.flags & DMA_OOB_PULSE);
 }
 
@@ -1068,8 +1068,8 @@ static struct _pl330_req *pl330_find_next_req(struct pl330_thread *thrd, int *id
 /* Start doing req 'idx' of thread 'thrd' */
 static bool _trigger(struct pl330_thread *thrd)
 {
-	dev_info(thrd->dmac->ddma.dev, "%s:%d thread=%p; inband? %d\n",
-		__func__, __LINE__, thrd, evl_is_inband());
+	// dev_info(thrd->dmac->ddma.dev, "%s:%d thread=%p; inband? %d\n",
+	// 	__func__, __LINE__, thrd, evl_is_inband());
 	void __iomem *regs = thrd->dmac->base;
 	struct _pl330_req *req;
 	struct dma_pl330_desc *desc;
@@ -1079,8 +1079,8 @@ static bool _trigger(struct pl330_thread *thrd)
 	int idx;
 
 	/* Return if already ACTIVE */
-	dev_info(thrd->dmac->ddma.dev, "%s:%d _state(thrd) = %d\n",
-		__func__, __LINE__, _state(thrd));
+	// dev_info(thrd->dmac->ddma.dev, "%s:%d _state(thrd) = %d\n",
+	// 	__func__, __LINE__, _state(thrd));
 	if (_state(thrd) != PL330_STATE_STOPPED)
 		return true;
 
@@ -1100,15 +1100,15 @@ static bool _trigger(struct pl330_thread *thrd)
 	if (!req)
 		return true;
 
-	dev_info(thrd->dmac->ddma.dev, "%s:%d, id = %d, idx = %d, thrd->req_running = %d, req=%p\n", __func__, __LINE__, 
-		thrd->id, idx, thrd->req_running, req);
+	// dev_info(thrd->dmac->ddma.dev, "%s:%d, id = %d, idx = %d, thrd->req_running = %d, req=%p\n", __func__, __LINE__, 
+	// 	thrd->id, idx, thrd->req_running, req);
 
 	/* Return if req is running */
 	if (idx == thrd->req_running && !pl330_oob_pulsed(req->desc))
 		return true;
 
 	desc = req->desc;
-	dev_info(thrd->dmac->ddma.dev, "%s:%d desc=%p\n", __func__, __LINE__, desc);
+	// dev_info(thrd->dmac->ddma.dev, "%s:%d desc=%p\n", __func__, __LINE__, desc);
 
 	ns = desc->rqcfg.nonsecure ? 1 : 0;
 
@@ -1121,16 +1121,16 @@ static bool _trigger(struct pl330_thread *thrd)
 	go.addr = req->mc_bus;
 	go.ns = ns;
 	_emit_GO(0, insn, &go);
-	dev_info(thrd->dmac->ddma.dev, "%s:%d insn[0]=%x, _emit_GO has been exceeded!\n",
-		__func__, __LINE__, insn[0]);
+	// dev_info(thrd->dmac->ddma.dev, "%s:%d insn[0]=%x, _emit_GO has been exceeded!\n",
+	// 	__func__, __LINE__, insn[0]);
 
 	/* Set to generate interrupts for SEV */
 	writel(readl(regs + INTEN) | (1 << thrd->ev), regs + INTEN);
 
 	/* Only manager can execute GO */
 	_execute_DBGINSN(thrd, insn, true);
-	dev_info(thrd->dmac->ddma.dev, "%s:%d insn[0]=%x, _execute_DBGINSN has been exceeded!\n",
-		__func__, __LINE__, insn[0]);
+	// dev_info(thrd->dmac->ddma.dev, "%s:%d insn[0]=%x, _execute_DBGINSN has been exceeded!\n",
+	// 	__func__, __LINE__, insn[0]);
 
 	thrd->req_running = idx;
 
@@ -1139,8 +1139,8 @@ static bool _trigger(struct pl330_thread *thrd)
 
 static bool pl330_start_thread(struct pl330_thread *thrd)
 {
-	dev_info(thrd->dmac->ddma.dev, "%s:%d thread=%p; inband? %d, _state(thrd)=%d\n",
-		__func__, __LINE__, thrd, evl_is_inband(), _state(thrd));
+	// dev_info(thrd->dmac->ddma.dev, "%s:%d thread=%p; inband? %d, _state(thrd)=%d\n",
+	// 	__func__, __LINE__, thrd, evl_is_inband(), _state(thrd));
 	
 	switch (_state(thrd)) {
 	case PL330_STATE_FAULT_COMPLETING:
@@ -1907,7 +1907,7 @@ static void pl330_dotask(struct tasklet_struct *t)
 /* Returns 1 if state was updated, 0 otherwise */
 static int pl330_update(struct pl330_dmac *pl330)
 {
-	dev_info(pl330->ddma.dev, "%s:%d\n", __func__, __LINE__);
+	// dev_info(pl330->ddma.dev, "%s:%d\n", __func__, __LINE__);
 	struct dma_pl330_desc *descdone;
 	unsigned long flags;
 	void __iomem *regs;
@@ -1984,13 +1984,13 @@ static int pl330_update(struct pl330_dmac *pl330)
 			active = thrd->req_running;
 			// dev_info(pl330->ddma.dev, "%s:%d id = %d, thrd = %p, active = %d\n",
 			// 		__func__, __LINE__, id, thrd, active);
-			dev_info(pl330->ddma.dev, "%s:%d valid val = %x, ev = %d, id = %d, thrd = %p, active = %d\n", __func__, __LINE__, val, ev, id, thrd, active);
+			// dev_info(pl330->ddma.dev, "%s:%d valid val = %x, ev = %d, id = %d, thrd = %p, active = %d\n", __func__, __LINE__, val, ev, id, thrd, active);
 			if (active == -1) /* Aborted */
 				continue;
 
 			/* Detach the req */
 			descdone = thrd->req[active].desc;
-			dev_info(pl330->ddma.dev, "%s:%d descdone = %px\n", __func__, __LINE__, descdone);
+			// dev_info(pl330->ddma.dev, "%s:%d descdone = %px\n", __func__, __LINE__, descdone);
 			if (descdone) {
 				if (running_oob()) {
 					// TODO: lock/unlock needed?
@@ -2023,7 +2023,7 @@ static int pl330_update(struct pl330_dmac *pl330)
 
 	if (!running_oob()) {
 		/* Now that we are in no hurry, do the callbacks */
-		dev_info(pl330->ddma.dev, "%s:%d list_empty(&pl330->req_done) = %d\n", __func__, __LINE__, list_empty(&pl330->req_done));
+		// dev_info(pl330->ddma.dev, "%s:%d list_empty(&pl330->req_done) = %d\n", __func__, __LINE__, list_empty(&pl330->req_done));
 		while (!list_empty(&pl330->req_done)) {
 			descdone = list_first_entry(&pl330->req_done,
 							struct dma_pl330_desc, rqd);
@@ -2359,10 +2359,10 @@ static inline void fill_queue(struct dma_pl330_chan *pch)
 		if (desc->status == BUSY || desc->status == PAUSED)
 			continue;
 
-		dev_info(pch->dmac->ddma.dev, "%s:%d desc's addr: %p, thread's addr: %p\n",
-			__func__, __LINE__, desc, pch->thread);
+		// dev_info(pch->dmac->ddma.dev, "%s:%d desc's addr: %p, thread's addr: %p\n",
+		// 	__func__, __LINE__, desc, pch->thread);
 		ret = pl330_submit_req(pch->thread, desc, &off);
-		dev_info(pch->dmac->ddma.dev, "%s:%d pl330_submit_req's ret = %d\n", __func__, __LINE__, ret);
+		// dev_info(pch->dmac->ddma.dev, "%s:%d pl330_submit_req's ret = %d\n", __func__, __LINE__, ret);
 		if (!ret) {
 			desc->status = BUSY;
 		} else if (ret == -EAGAIN) {
@@ -2836,7 +2836,7 @@ out:
 
 static void pl330_issue_pending(struct dma_chan *chan)
 {
-	dev_info(chan->device->dev, "%s:%d\n", __func__, __LINE__);
+	// dev_info(chan->device->dev, "%s:%d\n", __func__, __LINE__);
 	struct dma_pl330_chan *pch = to_pchan(chan);
 	unsigned long flags;
 
@@ -2867,7 +2867,7 @@ static int pl330_pulse_oob(struct dma_chan *chan)
 
 	raw_spin_lock_irqsave(&pch->thread->dmac->oob_lock, flags);
 	// TODO:
-	dev_info(pch->dmac->ddma.dev, "%s:%d\n", __func__, __LINE__);
+	// dev_info(pch->dmac->ddma.dev, "%s:%d\n", __func__, __LINE__);
 	// pl330_start_thread(pch->thread);
 	if (req && pl330_oob_pulsed(req->desc)) {
 		_trigger(pch->thread);
@@ -3142,8 +3142,8 @@ static struct dma_async_tx_descriptor *pl330_prep_dma_cyclic(
 	desc->cyclic = true;
 	desc->num_periods = len / period_len;
 	desc->txd.flags |= flags;
-	dev_info(pch->dmac->ddma.dev, "%s:%d desc's addr: %p, thread's addr: %p\n",
-		__func__, __LINE__, desc, pch->thread);
+	// dev_info(pch->dmac->ddma.dev, "%s:%d desc's addr: %p, thread's addr: %p\n",
+	// 	__func__, __LINE__, desc, pch->thread);
 
 	return &desc->txd;
 }
@@ -3308,7 +3308,6 @@ pl330_prep_slave_sg(struct dma_chan *chan, struct scatterlist *sgl,
 	if (unlikely(!pch || !sgl || !sg_len))
 		return NULL;
 
-	printk("pl330: pl330_prep_slave_sg: is pl330_oob_capable: %d, flags: %ld\n", pl330_oob_capable(), flg);
 	if (!pl330_oob_capable()) {
 		if (flg & (DMA_OOB_INTERRUPT|DMA_OOB_PULSE)) {
 			dev_err(pch->dmac->ddma.dev,
@@ -3338,8 +3337,8 @@ pl330_prep_slave_sg(struct dma_chan *chan, struct scatterlist *sgl,
 
 			return NULL;
 		}
-		dev_info(pch->dmac->ddma.dev, "%s:%d desc's addr: %p, thread's addr: %p\n",
-			__func__, __LINE__, desc, pch->thread);
+		// dev_info(pch->dmac->ddma.dev, "%s:%d desc's addr: %p, thread's addr: %p\n",
+		// 	__func__, __LINE__, desc, pch->thread);
 
 		if (!first)
 			first = desc;
