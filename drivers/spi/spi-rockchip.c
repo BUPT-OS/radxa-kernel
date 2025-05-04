@@ -757,8 +757,8 @@ static void rockchip_spi_oob_config(struct rockchip_spi *rs,
 	u32 cr1;
 	u32 dmacr = 0;
 
-	if (slave_mode)
-		cr0 |= CR0_OPM_SLAVE << CR0_OPM_OFFSET;
+	// if (slave_mode)
+	// 	cr0 |= CR0_OPM_SLAVE << CR0_OPM_OFFSET;
 	rs->slave_aborted = false;
 
 	cr0 |= rs->rsd << CR0_RSD_OFFSET;
@@ -1068,16 +1068,19 @@ static void rockchip_spi_start_oob_transfer(struct spi_controller *ctlr,
 	struct rockchip_spi *rs = spi_controller_get_devdata(ctlr);
 	dev_info(rs->dev, "call rockchip_spi_start_oob_transfer\n");
 	struct spi_device *spi = xfer->spi;
-	rockchip_spi_oob_config(rs, spi, xfer, ctlr->slave_abort);
 
+	pm_runtime_get_sync(rs->dev);
+	
 	// TODO: CS operation is more complex and need more design
 	if (spi_get_csgpiod(spi, 0))
 		ROCKCHIP_SPI_SET_BITS(rs->regs + ROCKCHIP_SPI_SER, 1);
 	else
 		ROCKCHIP_SPI_SET_BITS(rs->regs + ROCKCHIP_SPI_SER, BIT(spi->chip_select));
 
-	if (rs->cs_inactive)
-		writel_relaxed(INT_CS_INACTIVE, rs->regs + ROCKCHIP_SPI_IMR);
+	rockchip_spi_oob_config(rs, spi, xfer, ctlr->slave_abort);
+
+	// if (rs->cs_inactive)
+	// 	writel_relaxed(INT_CS_INACTIVE, rs->regs + ROCKCHIP_SPI_IMR);
 
 	spi_enable_chip(rs, true);
 }
@@ -1085,21 +1088,21 @@ static void rockchip_spi_start_oob_transfer(struct spi_controller *ctlr,
 static void rockchip_spi_pulse_oob_transfer(struct spi_controller *ctlr,
 					struct spi_oob_transfer *xfer)
 {
-	struct rockchip_spi *rs = spi_controller_get_devdata(ctlr);
-	dev_info(rs->dev, "call rockchip_spi_pulse_oob_transfer\n");
+	// struct rockchip_spi *rs = spi_controller_get_devdata(ctlr);
+	// dev_info(rs->dev, "call rockchip_spi_pulse_oob_transfer\n");
 
-	/* unfortunately setting the fifo threshold level to generate an
-	 * interrupt exactly when the fifo is full doesn't seem to work,
-	 * so we need the strict inequality here
-	 */
-	 if ((xfer->setup.frame_len / rs->n_bytes) < rs->fifo_len)
-		writel_relaxed(xfer->setup.frame_len / rs->n_bytes - 1, rs->regs + ROCKCHIP_SPI_RXFTLR);
- 	else
-		writel_relaxed(rs->fifo_len / 2 - 1, rs->regs + ROCKCHIP_SPI_RXFTLR);
+	// /* unfortunately setting the fifo threshold level to generate an
+	//  * interrupt exactly when the fifo is full doesn't seem to work,
+	//  * so we need the strict inequality here
+	//  */
+	//  if ((xfer->setup.frame_len / rs->n_bytes) < rs->fifo_len)
+	// 	writel_relaxed(xfer->setup.frame_len / rs->n_bytes - 1, rs->regs + ROCKCHIP_SPI_RXFTLR);
+ 	// else
+	// 	writel_relaxed(rs->fifo_len / 2 - 1, rs->regs + ROCKCHIP_SPI_RXFTLR);
 
- 	writel_relaxed(rs->fifo_len / 2 - 1, rs->regs + ROCKCHIP_SPI_DMATDLR);
- 	writel_relaxed(rockchip_spi_calc_burst_size(xfer->setup.frame_len / rs->n_bytes) - 1,
-			rs->regs + ROCKCHIP_SPI_DMARDLR);
+ 	// writel_relaxed(rs->fifo_len / 2 - 1, rs->regs + ROCKCHIP_SPI_DMATDLR);
+ 	// writel_relaxed(rockchip_spi_calc_burst_size(xfer->setup.frame_len / rs->n_bytes) - 1,
+	// 		rs->regs + ROCKCHIP_SPI_DMARDLR);
 
 }
 
@@ -1113,15 +1116,19 @@ static void rockchip_spi_terminate_oob_transfer(struct spi_controller *ctlr,
 	 */
 	 spi_enable_chip(rs, false);
 
+
+	 /* make sure all interrupts are masked and status cleared */
+	 writel_relaxed(0, rs->regs + ROCKCHIP_SPI_IMR);
+	 writel_relaxed(0xffffffff, rs->regs + ROCKCHIP_SPI_ICR);
+
 	struct spi_device *spi = xfer->spi;
 	if (spi_get_csgpiod(spi, 0))
 		ROCKCHIP_SPI_CLR_BITS(rs->regs + ROCKCHIP_SPI_SER, 1);
 	else
 		ROCKCHIP_SPI_CLR_BITS(rs->regs + ROCKCHIP_SPI_SER, BIT(spi->chip_select));
 
-	 /* make sure all interrupts are masked and status cleared */
-	 writel_relaxed(0, rs->regs + ROCKCHIP_SPI_IMR);
-	 writel_relaxed(0xffffffff, rs->regs + ROCKCHIP_SPI_ICR);
+	pm_runtime_put(rs->dev);
+
 }
 
 #else
