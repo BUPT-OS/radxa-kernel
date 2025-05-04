@@ -773,6 +773,13 @@ config SPI_ROCKCHIP
 	  The main usecase of this controller is to use spi flash as boot
 	  device.
 
+config SPI_ROCKCHIP_OOB
+	bool "Out-of-band support for Rockchip SPI controller"
+	depends on SPI_ROCKCHIP && DOVETAIL
+	select SPI_OOB
+	help
+	  Enable out-of-band cyclic transfers.
+
 config SPI_ROCKCHIP_MISCDEV
 	bool "Rockchip SPI controller misc devices"
 	depends on SPI_ROCKCHIP
